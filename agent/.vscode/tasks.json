@@ -2,29 +2,28 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Inspect repository worktree status",
+			"label": "Focused control security tests",
 			"type": "shell",
-			"command": "git",
+			"command": "C:\\Users\\Q.C\\Desktop\\agent\\venv\\Scripts\\python.exe",
 			"args": [
-				"-C",
-				"C:\\Users\\Q.C\\Desktop",
-				"status",
-				"--short"
+				"-m",
+				"unittest",
+				"discover",
+				"-s",
+				"tests",
+				"-p",
+				"test_control_security.py"
 			],
 			"isBackground": false,
 			"problemMatcher": []
 		},
 		{
-			"label": "Inspect agent worktree status",
+			"label": "Check dashboard JavaScript syntax",
 			"type": "shell",
-			"command": "git",
+			"command": "node",
 			"args": [
-				"-C",
-				"C:\\Users\\Q.C\\Desktop",
-				"status",
-				"--short",
-				"--",
-				"agent"
+				"--check",
+				"C:\\Users\\Q.C\\Desktop\\agent\\nova_apex\\server\\static\\app.js"
 			],
 			"isBackground": false,
 			"problemMatcher": []

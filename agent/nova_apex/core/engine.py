@@ -84,7 +84,8 @@ class AutonomousEngine:
             "title": step.title,
             "description": step.description,
             "domain": step.domain.value,
-            "action_type": step.action_type.value
+            "action_type": step.action_type.value,
+            "target": step.suggested_action.target
         }
         self.active_goal.status = GoalStatus.WAITING_HUMAN
         self.active_goal.updated_at = datetime.utcnow()

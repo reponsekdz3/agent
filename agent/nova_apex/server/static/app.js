@@ -6,6 +6,10 @@ let authRequired = false;
 let csrfToken = null;
 let dashboardStarted = false;
 let controllerReachable = false;
+let statusPollTimer = null;
+let telemetryPollTimer = null;
+let browserTabsPollTimer = null;
+let websocketReconnectTimer = null;
 const nativeFetch = window.fetch.bind(window);
 
 window.fetch = async (input, init = {}) => {
@@ -26,6 +30,7 @@ window.fetch = async (input, init = {}) => {
 const PRESETS = {
   navigate_github: "Launch browser and navigate to https://github.com, inspect the page DOM, and capture high-res verification screenshot.",
   create_account: "Navigate to GitHub signup portal at https://github.com/signup, inspect registration fields, fill the form for review, and stop before final submission.",
+  assisted_order_booking: "Search and compare options for the product or service I describe. Summarize availability, prices, and important terms, prepare a draft selection for my review, then stop before checkout, purchase, reservation, booking, payment, or final submission.",
   scaffold_fullstack: "Scaffold a complete modern project in workspace with frontend, backend, dockerfile, documentation, and configuration files.",
   desktop_audit: "Inspect desktop screen, list all active workspace directories, verify system integrity, and capture a verification snapshot.",
   web_research: "Browse the web, research current breakthrough developments in autonomous multimodal AI agents, and generate a summary report.",
@@ -79,7 +84,11 @@ async function decideApproval(approved) {
 function startDashboard() {
   document.getElementById("auth-overlay").hidden = true;
   document.getElementById("btn-logout").hidden = !authRequired;
-  if (dashboardStarted) return;
+  if (dashboardStarted) {
+    if (!socket || socket.readyState === WebSocket.CLOSED) connectWebSocket();
+    pollStatus();
+    return;
+  }
   dashboardStarted = true;
   connectWebSocket();
   pollStatus();
@@ -87,9 +96,9 @@ function startDashboard() {
   loadBrowserTabs();
   loadVault();
   loadOfflineQueue();
-  setInterval(pollStatus, 1500);
-  setInterval(pollTelemetry, 10000);
-  setInterval(loadBrowserTabs, 5000);
+  statusPollTimer = setInterval(pollStatus, 1500);
+  telemetryPollTimer = setInterval(pollTelemetry, 10000);
+  browserTabsPollTimer = setInterval(loadBrowserTabs, 5000);
 }
 
 async function logout() {
@@ -97,6 +106,17 @@ async function logout() {
     const response = await fetch("/api/auth/logout", { method: "POST" });
     if (!response.ok) throw new Error(`Sign out failed (${response.status})`);
     csrfToken = null;
+    dashboardStarted = false;
+    clearInterval(statusPollTimer);
+    clearInterval(telemetryPollTimer);
+    clearInterval(browserTabsPollTimer);
+    clearTimeout(websocketReconnectTimer);
+    statusPollTimer = telemetryPollTimer = browserTabsPollTimer = websocketReconnectTimer = null;
+    if (socket) {
+      socket.onclose = null;
+      socket.close();
+      socket = null;
+    }
     showAuthOverlay();
   } catch (error) {
     showToast(`Unable to sign out: ${error.message}`);
@@ -171,6 +191,8 @@ function connectWebSocket() {
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
+      clearTimeout(websocketReconnectTimer);
+      websocketReconnectTimer = null;
       appendLog({ level: "SYSTEM", domain: "NETWORK", message: "Real-time telemetry link established." });
     };
 
@@ -187,7 +209,13 @@ function connectWebSocket() {
     };
 
     socket.onclose = () => {
-      setTimeout(connectWebSocket, 4000);
+      socket = null;
+      if (dashboardStarted && !websocketReconnectTimer) {
+        websocketReconnectTimer = setTimeout(() => {
+          websocketReconnectTimer = null;
+          connectWebSocket();
+        }, 4000);
+      }
     };
 
     socket.onerror = () => {
@@ -560,6 +588,7 @@ function renderStatus(data) {
   if (pendingApproval) {
     approvalDescription.textContent =
       `${pendingApproval.title || "Action"}: ${pendingApproval.description || pendingApproval.action_type} ` +
+      `${pendingApproval.target ? `Target: ${pendingApproval.target}. ` : ""}` +
       `(${pendingApproval.domain} / ${pendingApproval.action_type}). Approving may cause an external change.`;
   }
 

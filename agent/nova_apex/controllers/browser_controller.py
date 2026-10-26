@@ -188,6 +188,12 @@ class BrowserController:
                 return StepResult(action_id=action.action_id, success=True, output="Screenshot captured", screenshot_path=shot_path)
 
             elif action_type == "evaluate_js":
+                if not action.params.get("user_confirmed"):
+                    return StepResult(
+                        action_id=action.action_id,
+                        success=False,
+                        error="Page JavaScript execution requires explicit user confirmation."
+                    )
                 script = action.value or action.target
                 agent_logger.action("Evaluating JavaScript in page context...", domain="BROWSER")
                 res = await self.page.evaluate(script)
@@ -204,8 +210,6 @@ class BrowserController:
     async def auto_fill_registration(self, action: ActionRequest) -> StepResult:
         """Fill a registration form for user review without accepting terms or submitting it."""
         agent_logger.info("Scanning page for registration fields...", domain="BROWSER")
-        import string
-
         rand_id = secrets.token_hex(4)
         generated_username = f"nova_agent_{rand_id}"
         generated_password = f"NovaApex#{secrets.token_urlsafe(16)}"

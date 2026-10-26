@@ -87,9 +87,9 @@ def _origin_matches_host(origin: Optional[str], host: Optional[str]) -> bool:
 
 @app.on_event("startup")
 async def enforce_safe_bind_configuration():
-    if not settings.auth_password and not _is_loopback_host(settings.server_host):
+    if not settings.auth_password:
         raise RuntimeError(
-            "NOVA_APEX_AUTH_PASSWORD is required when SERVER_HOST is not a loopback address."
+            "NOVA_APEX_AUTH_PASSWORD is required for dashboard access, including loopback use."
         )
     if settings.auth_password and len(settings.auth_password) < 16:
         raise RuntimeError("NOVA_APEX_AUTH_PASSWORD must contain at least 16 characters.")
@@ -111,7 +111,10 @@ async def protect_control_api(request: Request, call_next):
         if not _origin_matches_host(origin, request.headers.get("host")):
             response = JSONResponse({"detail": "Cross-origin requests are not allowed."}, status_code=403)
 
-        elif settings.auth_password:
+        elif not settings.auth_password:
+            response = JSONResponse({"detail": "Dashboard authentication is not configured."}, status_code=503)
+
+        else:
             session = _get_session(request.cookies.get(AUTH_COOKIE_NAME))
             if not session:
                 response = JSONResponse({"detail": "Authentication required."}, status_code=401)
@@ -141,7 +144,7 @@ async def protect_control_api(request: Request, call_next):
 @app.get("/api/auth/status")
 async def get_auth_status(request: Request):
     if not settings.auth_password:
-        return {"required": False, "authenticated": True}
+        return {"required": True, "authenticated": False, "csrf_token": None}
     session = _get_session(request.cookies.get(AUTH_COOKIE_NAME))
     return {
         "required": True,
@@ -154,7 +157,7 @@ async def login(req: LoginRequest, request: Request):
     if not _origin_matches_host(request.headers.get("origin"), request.headers.get("host")):
         raise HTTPException(status_code=403, detail="Cross-origin login is not allowed.")
     if not settings.auth_password:
-        raise HTTPException(status_code=404, detail="Authentication is not enabled for this local-only server.")
+        raise HTTPException(status_code=503, detail="Configure NOVA_APEX_AUTH_PASSWORD before starting the dashboard.")
     client_host = request.client.host if request.client else "unknown"
     now = time.time()
     recent_failures = [stamp for stamp in _failed_logins.get(client_host, []) if now - stamp < 900]
@@ -389,7 +392,7 @@ async def websocket_endpoint(websocket: WebSocket):
     if not _origin_matches_host(websocket.headers.get("origin"), websocket.headers.get("host")):
         await websocket.close(code=1008)
         return
-    if settings.auth_password and not _get_session(websocket.cookies.get(AUTH_COOKIE_NAME)):
+    if not settings.auth_password or not _get_session(websocket.cookies.get(AUTH_COOKIE_NAME)):
         await websocket.close(code=1008)
         return
     await ws_manager.connect(websocket)

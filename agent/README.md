@@ -10,7 +10,7 @@ NOVA-APEX is a Windows-hosted automation controller with a responsive browser da
    .\venv\Scripts\Activate.ps1
    ```
 
-2. Copy `.env.example` to `.env`. The default server bind is `127.0.0.1`; leave it there for local-only use.
+2. Copy `.env.example` to `.env`, set a unique `NOVA_APEX_AUTH_PASSWORD` of at least 16 characters, and retain the default `SERVER_HOST=127.0.0.1` for local-only use.
 3. Start the dashboard:
 
    ```powershell
@@ -19,7 +19,7 @@ NOVA-APEX is a Windows-hosted automation controller with a responsive browser da
 
 4. Open <http://127.0.0.1:8000>.
 
-The local-only default does not require a dashboard password. For authenticated access on a private network, set a unique `NOVA_APEX_AUTH_PASSWORD` of at least 16 characters, retain `NOVA_APEX_COOKIE_SECURE=true`, and configure the network edge as described below. Do not expose the controller directly to the public internet.
+Dashboard authentication is required even for loopback use. The server refuses to start if the password is missing or too short. For authenticated access on a private network, retain `NOVA_APEX_COOKIE_SECURE=true` and configure the network edge as described below. Do not expose the controller directly to the public internet.
 
 ## Private remote access
 
@@ -41,7 +41,7 @@ The app uses an HttpOnly, SameSite=Strict session cookie, an expiring in-memory 
 See `.env.example` for the supported environment variables. Relevant settings:
 
 - `SERVER_HOST` and `SERVER_PORT`: loopback by default; choose a private interface only when using authenticated private access over TLS.
-- `NOVA_APEX_AUTH_PASSWORD`: optional for loopback-only use; required for non-loopback binding, minimum 16 characters.
+- `NOVA_APEX_AUTH_PASSWORD`: required for all dashboard access; minimum 16 characters.
 - `NOVA_APEX_COOKIE_SECURE`: keep `true` for HTTPS and all authenticated non-loopback access.
 - `NOVA_APEX_SESSION_TTL_SECONDS`: session lifetime, minimum 60 seconds.
 - `WORKSPACE_DIR`: workspace root for dashboard file operations.

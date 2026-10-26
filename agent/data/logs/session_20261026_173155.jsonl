@@ -1,3 +1,0 @@
-{"timestamp": "2026-10-26T17:31:56.315899", "level": "INFO", "domain": "DESKTOP", "message": "Desktop GUI controller initialized. Screen size: 2560x1440", "data": {}}
-{"timestamp": "2026-10-26T17:31:57.100969", "level": "WARNING", "domain": "ENGINE", "message": "Agent execution paused.", "data": {}}
-{"timestamp": "2026-10-26T17:31:57.729178", "level": "INFO", "domain": "SECURITY", "message": "Credential explicitly revealed for [example.test] as [review-user]", "data": {}}

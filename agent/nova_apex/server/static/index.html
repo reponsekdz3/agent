@@ -63,7 +63,8 @@
           <select id="preset-selector">
             <option value="">⚡ Load Quick Action Preset...</option>
             <option value="navigate_github">Navigate & Inspect GitHub</option>
-            <option value="create_account">Create automated web account on GitHub</option>
+            <option value="create_account">Prepare GitHub registration form for review</option>
+            <option value="assisted_order_booking">Search and compare an order or booking (stop before confirmation)</option>
             <option value="scaffold_fullstack">Scaffold a full-stack project & files in workspace</option>
             <option value="desktop_audit">Take desktop screenshot and audit system files</option>
             <option value="web_research">Deep web research: Next-gen AI agent architectures</option>
@@ -73,7 +74,7 @@
       </div>
 
       <div class="goal-input-container">
-        <textarea id="goal-prompt" placeholder="Instruct NOVA-APEX in natural language... (e.g., 'Navigate to github.com, inspect the page, fill registration credentials and store to vault')"></textarea>
+        <textarea id="goal-prompt" placeholder="Describe a task for NOVA-APEX... Search and compare options, prepare a draft, or inspect a page. Final external actions always stop for your confirmation."></textarea>
         
         <!-- Live Mission Progress Bar -->
         <div class="progress-bar-container" id="progress-container" style="display: none;">
@@ -307,13 +308,13 @@
       <div class="panel-header">
         <div class="panel-title">
           <span class="panel-icon">🔐</span>
-          <h2>LIVE 2FA / OTP INTERCEPTOR</h2>
+          <h2>2FA / OTP REVIEW</h2>
         </div>
         <button class="btn-sm" data-action="scan-mobile-otp">⚡ Scan Notifications</button>
       </div>
       <div class="otp-interceptor-box" id="otp-interceptor-box">
         <p>Awaiting incoming 2FA SMS or notification codes...</p>
-        <span class="sub-text">Any 4-8 digit verification code sent to the connected phone will automatically display here.</span>
+        <span class="sub-text">A user-requested scan may display a code for review; codes are never entered automatically.</span>
       </div>
     </section>
   </main>

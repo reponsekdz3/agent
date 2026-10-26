@@ -11,7 +11,14 @@ from nova_apex.config.settings import settings
 from nova_apex.controllers.browser_controller import BrowserController
 from nova_apex.core.engine import AutonomousEngine
 from nova_apex.core.memory import agent_memory
-from nova_apex.core.schemas import ActionDomain, ActionRequest, ActionType, PlanStep
+from nova_apex.core.schemas import (
+    ActionDomain,
+    ActionRequest,
+    ActionType,
+    AgentGoal,
+    GoalStatus,
+    PlanStep,
+)
 
 server_module = importlib.import_module("nova_apex.server.app")
 
@@ -56,7 +63,9 @@ class ControlSecurityTests(unittest.TestCase):
         }
 
     def test_authentication_session_csrf_origin_and_expiry(self):
-        self.assertEqual(self.client.get("/api/status").status_code, 401)
+        unauthorized = self.client.get("/api/status")
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(unauthorized.headers["x-frame-options"], "DENY")
 
         csrf_token = self.sign_in()
         self.assertEqual(self.client.get("/api/status").status_code, 200)
@@ -99,6 +108,46 @@ class ControlSecurityTests(unittest.TestCase):
             headers={"Origin": "http://testserver"},
         )
         self.assertEqual(limited.status_code, 429)
+
+    def test_logout_revokes_session_and_dashboard_shell_is_served(self):
+        csrf_token = self.sign_in()
+        logout = self.client.post(
+            "/api/auth/logout",
+            headers=self.post_headers(csrf_token),
+        )
+        self.assertEqual(logout.status_code, 200)
+        self.assertFalse(self.client.get("/api/auth/status").json()["authenticated"])
+
+        shell = self.client.get("/")
+        self.assertEqual(shell.status_code, 200)
+        self.assertIn("approval-panel", shell.text)
+        self.assertIn("assisted_order_booking", shell.text)
+        worker = self.client.get("/service-worker.js")
+        self.assertEqual(worker.status_code, 200)
+        self.assertIn("nova-apex-shell-v2", worker.text)
+
+    def test_non_loopback_requires_secure_cookie(self):
+        settings.server_host = "0.0.0.0"
+        settings.auth_cookie_secure = False
+        with self.assertRaisesRegex(RuntimeError, "COOKIE_SECURE=true"):
+            asyncio.run(server_module.enforce_safe_bind_configuration())
+
+    def test_missing_password_fails_closed_even_on_loopback(self):
+        settings.auth_password = ""
+        self.assertEqual(self.client.get("/api/status").status_code, 503)
+        status = self.client.get("/api/auth/status").json()
+        self.assertTrue(status["required"])
+        self.assertFalse(status["authenticated"])
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/login",
+                json={"password": "anything"},
+                headers={"Origin": "http://testserver"},
+            ).status_code,
+            503,
+        )
+        with self.assertRaisesRegex(RuntimeError, "including loopback use"):
+            asyncio.run(server_module.enforce_safe_bind_configuration())
 
     def test_workspace_path_containment(self):
         workspace = Path(__file__).resolve().parent / ".security-workspace"
@@ -159,6 +208,34 @@ class ControlSecurityTests(unittest.TestCase):
         self.assertTrue(engine._requires_approval(click))
         self.assertFalse(engine._requires_approval(navigate))
 
+    def test_approval_waits_for_a_decision_and_rejects_safely(self):
+        engine = AutonomousEngine()
+        action = ActionRequest(
+            domain=ActionDomain.BROWSER,
+            action_type=ActionType.CLICK_ELEMENT,
+            description="Possible booking confirmation",
+            target="button.confirm",
+        )
+        step = PlanStep(
+            step_id=1,
+            title="Review booking",
+            description="Stop before confirming a reservation.",
+            domain=action.domain,
+            action_type=action.action_type,
+            suggested_action=action,
+        )
+        engine.active_goal = AgentGoal(prompt="Compare options", status=GoalStatus.EXECUTING)
+
+        async def check_rejection():
+            approval = asyncio.create_task(engine._request_action_approval(step))
+            await asyncio.sleep(0)
+            self.assertEqual(engine.get_status()["status"], "waiting_human")
+            self.assertEqual(engine.get_status()["pending_approval"]["target"], "button.confirm")
+            self.assertTrue(engine.reject_pending_action())
+            self.assertFalse(await approval)
+
+        asyncio.run(check_rejection())
+
     def test_direct_form_submission_requires_confirmation(self):
         csrf_token = self.sign_in()
         browser_module = importlib.import_module("nova_apex.controllers.browser_controller")
@@ -194,17 +271,27 @@ class ControlSecurityTests(unittest.TestCase):
             browser.execute_action = original_execute
 
     def test_controller_refuses_unconfirmed_browser_click(self):
-        controller = BrowserController()
-        controller.initialize = AsyncMock()
-        action = ActionRequest(
-            domain=ActionDomain.BROWSER,
-            action_type=ActionType.CLICK_ELEMENT,
-            description="Potential final action",
-            target="button#continue",
+        actions = (
+            ActionRequest(
+                domain=ActionDomain.BROWSER,
+                action_type=ActionType.CLICK_ELEMENT,
+                description="Potential final action",
+                target="button#continue",
+            ),
+            ActionRequest(
+                domain=ActionDomain.BROWSER,
+                action_type=ActionType.EVALUATE_JS,
+                description="Unapproved page script",
+                value="document.title",
+            ),
         )
-        result = asyncio.run(controller.execute_action(action))
-        self.assertFalse(result.success)
-        self.assertIn("explicit user confirmation", result.error)
+        for action in actions:
+            with self.subTest(action=action.action_type):
+                controller = BrowserController()
+                controller.initialize = AsyncMock()
+                result = asyncio.run(controller.execute_action(action))
+                self.assertFalse(result.success)
+                self.assertIn("explicit user confirmation", result.error)
 
     def test_browser_viewport_click_requires_confirmation(self):
         csrf_token = self.sign_in()
