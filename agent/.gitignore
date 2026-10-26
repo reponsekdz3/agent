@@ -1,4 +1,23 @@
-echo "*.exe" >> .gitignore
-echo "*.msi" >> .gitignore
-git add .gitignore
-git commit -m "Ignore installer files"
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Runtime state can contain credentials, cookies, screenshots, or personal data
+data/artifacts/*
+data/browser_profiles/*
+data/logs/*
+!data/**/.gitkeep
+
+# Python build/test files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

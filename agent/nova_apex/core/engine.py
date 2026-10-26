@@ -20,6 +20,24 @@ class AutonomousEngine:
         self._is_paused = False
         self._is_aborted = False
         self._lock = asyncio.Lock()
+        self._reserved = False
+
+    def reserve_goal(self) -> bool:
+        """Atomically reserve the single mission slot for an API request."""
+        if self._reserved:
+            return False
+        if self.active_goal and self.active_goal.status in {
+            GoalStatus.PLANNING, GoalStatus.EXECUTING, GoalStatus.PAUSED,
+        }:
+            return False
+        self._reserved = True
+        return True
+
+    async def run_reserved_goal(self, prompt: str) -> AgentGoal:
+        try:
+            return await self.run_goal(prompt)
+        finally:
+            self._reserved = False
 
     def get_status(self) -> Dict[str, Any]:
         if not self.active_goal:
@@ -38,20 +56,35 @@ class AutonomousEngine:
         }
 
     async def run_goal(self, prompt: str) -> AgentGoal:
+        prompt = (prompt or "").strip()
+        if not prompt:
+            raise ValueError("Goal prompt cannot be empty.")
         async with self._lock:
             self._is_aborted = False
             self._is_paused = False
-            
-            # Immediately register new active goal so UI updates instantly
-            self.active_goal = AgentGoal(
-                prompt=prompt,
-                status=GoalStatus.PLANNING,
-                steps=[]
-            )
-            agent_logger.info(f"Initializing autonomous mission: '{prompt}'", domain="ENGINE", goal_id=self.active_goal.goal_id)
 
-            # Phase 1: Synthesize High-Level Execution Plan
-            goal = await planner.create_plan(prompt)
+            self.active_goal = AgentGoal(prompt=prompt, status=GoalStatus.PLANNING, steps=[])
+            agent_logger.info(f"Initializing autonomous mission: '{prompt[:120]}'", domain="ENGINE", goal_id=self.active_goal.goal_id)
+
+            # A planner exception must not leave the dashboard stuck in PLANNING.
+            try:
+                goal = await planner.create_plan(prompt)
+            except Exception as exc:
+                goal = self.active_goal
+                goal.status = GoalStatus.FAILED
+                goal.summary = f"Planning failed: {type(exc).__name__}: {exc}"
+                goal.updated_at = datetime.utcnow()
+                agent_logger.error("Mission planning failed.", domain="ENGINE")
+                return goal
+
+            if not goal.steps:
+                goal.status = GoalStatus.FAILED
+                goal.summary = goal.summary or "Planner returned no executable steps; no actions were run."
+                goal.updated_at = datetime.utcnow()
+                self.active_goal = goal
+                agent_logger.error("Planner produced an empty execution plan; failing closed.", domain="ENGINE")
+                return goal
+
             goal.status = GoalStatus.EXECUTING
             self.active_goal = goal
 
@@ -62,9 +95,13 @@ class AutonomousEngine:
                     agent_logger.warning("Mission execution manually aborted.", domain="ENGINE")
                     break
 
-                while self._is_paused:
+                while self._is_paused and not self._is_aborted:
                     goal.status = GoalStatus.PAUSED
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.1)
+                if self._is_aborted:
+                    goal.status = GoalStatus.FAILED
+                    agent_logger.warning("Mission abort acknowledged before the next action.", domain="ENGINE")
+                    break
                 goal.status = GoalStatus.EXECUTING
 
                 goal.current_step_index = i
@@ -102,7 +139,7 @@ class AutonomousEngine:
                         agent_logger.error(f"Milestone {step.step_id} failed after recovery attempts.", domain="ENGINE")
 
             # Final Evaluation
-            all_succeeded = all(s.status == StepStatus.SUCCESS for s in goal.steps)
+            all_succeeded = bool(goal.steps) and all(s.status == StepStatus.SUCCESS for s in goal.steps)
             goal.status = GoalStatus.SUCCESS if all_succeeded else GoalStatus.FAILED
             goal.updated_at = datetime.utcnow()
 

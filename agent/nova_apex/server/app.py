@@ -1,14 +1,15 @@
 import os
 import re
 import asyncio
+import ipaddress
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from nova_apex.config.settings import settings
 from nova_apex.core.engine import engine
@@ -17,6 +18,7 @@ from nova_apex.core.memory import agent_memory
 from nova_apex.core.schemas import ActionDomain, ActionType, ActionRequest
 from nova_apex.skills.system_admin import system_admin
 from nova_apex.server.ws_manager import ws_manager
+from nova_apex.security import resolve_inside
 
 app = FastAPI(
     title="NOVA-APEX Universal Automation OS",
@@ -24,16 +26,54 @@ app = FastAPI(
     version="1.0.0"
 )
 
+ALLOWED_ORIGINS = {
+    item.strip().rstrip("/")
+    for item in os.getenv(
+        "SERVER_ALLOWED_ORIGINS",
+        f"http://127.0.0.1:{settings.server_port},http://localhost:{settings.server_port}",
+    ).split(",")
+    if item.strip()
+}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=sorted(ALLOWED_ORIGINS),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Nova-Apex-Request"],
 )
 
+@app.middleware("http")
+async def local_mission_control_guard(request: Request, call_next):
+    """Keep this computer-control API local and reject untrusted browser origins."""
+    host_header = request.headers.get("host", "").split(":", 1)[0].strip("[]").lower()
+    if host_header and host_header not in {"localhost", "127.0.0.1", "::1", "testserver"}:
+        return JSONResponse(status_code=403, content={"detail": "Mission Control only accepts local Host headers."})
+
+    client_host = request.client.host if request.client else ""
+    if client_host != "testclient":
+        try:
+            if not ipaddress.ip_address(client_host).is_loopback:
+                return JSONResponse(status_code=403, content={"detail": "Mission Control is restricted to loopback clients."})
+        except ValueError:
+            return JSONResponse(status_code=403, content={"detail": "Unable to verify local client address."})
+
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") not in ALLOWED_ORIGINS:
+        return JSONResponse(status_code=403, content={"detail": "Request origin is not allowed."})
+    if origin and request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.headers.get("x-nova-apex-request") != "1":
+        return JSONResponse(status_code=403, content={"detail": "Missing required same-origin request marker."})
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 class GoalRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=4000)
 
 @app.get("/api/status")
 async def get_status():
@@ -41,12 +81,14 @@ async def get_status():
 
 @app.post("/api/goal")
 async def submit_goal(req: GoalRequest, background_tasks: BackgroundTasks):
-    if not req.prompt.strip():
+    prompt = req.prompt.strip()
+    if not prompt:
         raise HTTPException(status_code=400, detail="Goal prompt cannot be empty.")
+    if not engine.reserve_goal():
+        raise HTTPException(status_code=409, detail="A mission is already active or queued.")
 
-    # Run engine in background task
-    background_tasks.add_task(engine.run_goal, req.prompt)
-    return {"message": "Goal accepted and scheduled for execution.", "prompt": req.prompt}
+    background_tasks.add_task(engine.run_reserved_goal, prompt)
+    return {"message": "Goal accepted and scheduled for execution.", "prompt": prompt}
 
 @app.post("/api/pause")
 async def pause_agent():
@@ -66,8 +108,9 @@ async def abort_agent():
 @app.get("/api/vault")
 async def get_vault():
     return {
+        "credentials": agent_memory.credential_metadata(),
         "created_accounts": agent_memory.vault.get("created_accounts", []),
-        "saved_entities": agent_memory.vault.get("saved_entities", {})
+        "saved_entities": agent_memory.vault.get("saved_entities", {}),
     }
 
 @app.get("/api/telemetry")
@@ -169,13 +212,26 @@ async def direct_click(req: DirectClickRequest):
 
 @app.get("/api/artifacts/{filename}")
 async def get_artifact(filename: str):
-    file_path = settings.artifacts_dir / filename
-    if not file_path.exists():
+    try:
+        file_path = resolve_inside(settings.artifacts_dir, filename)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid artifact path.")
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(str(file_path))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    client = websocket.client.host if websocket.client else ""
+    origin = websocket.headers.get("origin")
+    host_header = websocket.headers.get("host", "").split(":", 1)[0].strip("[]").lower()
+    try:
+        local_client = client == "testclient" or ipaddress.ip_address(client).is_loopback
+    except ValueError:
+        local_client = False
+    if not local_client or (origin and origin.rstrip("/") not in ALLOWED_ORIGINS) or (host_header and host_header not in {"localhost", "127.0.0.1", "::1", "testserver"}):
+        await websocket.close(code=1008, reason="Local Mission Control connections only")
+        return
     await ws_manager.connect(websocket)
     try:
         # Send current logs history immediately on connection
@@ -219,7 +275,10 @@ async def get_workspace_tree():
 
 @app.get("/api/manage/workspace/file")
 async def get_workspace_file(path: str):
-    target = settings.workspace_dir / path
+    try:
+        target = resolve_inside(settings.workspace_dir, path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace path.")
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found in workspace")
     try:
@@ -235,15 +294,23 @@ class SaveFileRequest(BaseModel):
 
 @app.post("/api/manage/workspace/file")
 async def save_workspace_file(req: SaveFileRequest):
-    target = settings.workspace_dir / req.path
+    try:
+        target = resolve_inside(settings.workspace_dir, req.path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace path.")
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "w", encoding="utf-8") as f:
         f.write(req.content)
     return {"success": True, "path": req.path, "bytes": len(req.content)}
 
 @app.delete("/api/manage/workspace/file")
-async def delete_workspace_file(path: str):
-    target = settings.workspace_dir / path
+async def delete_workspace_file(path: str, confirm: bool = False):
+    if not confirm:
+        raise HTTPException(status_code=428, detail="Deletion requires confirm=true after reviewing the selected path.")
+    try:
+        target = resolve_inside(settings.workspace_dir, path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace path.")
     if target.exists():
         if target.is_file():
             target.unlink()
@@ -340,11 +407,11 @@ async def get_manage_windows():
 async def get_mobile_otp():
     from nova_apex.controllers.mobile_controller import mobile_controller
     devices = mobile_controller.get_connected_devices()
-    if not devices:
-        return {"connected": False, "otp": None, "message": "No ADB device connected"}
-    target = mobile_controller.active_device or devices[0]
-    otp = mobile_controller.extract_latest_otp(target)
-    return {"connected": True, "device": target, "otp": otp}
+    return {
+        "connected": bool(devices),
+        "otp": None,
+        "message": "Automatic OTP extraction is disabled. Enter verification codes manually in the intended service.",
+    }
 
 # 4. Browser Tabs & Cookies Management
 @app.get("/api/manage/browser/tabs")
@@ -372,7 +439,11 @@ async def get_browser_cookies():
         return {"cookies": []}
     try:
         cookies = await browser_controller.context.cookies()
-        return {"count": len(cookies), "cookies": cookies[:50]}
+        safe_cookies = [
+            {key: item.get(key) for key in ("name", "domain", "path", "expires", "httpOnly", "secure", "sameSite")}
+            for item in cookies[:50]
+        ]
+        return {"count": len(cookies), "cookies": safe_cookies}
     except Exception:
         return {"cookies": []}
 
@@ -385,21 +456,22 @@ class CredentialItem(BaseModel):
 
 @app.post("/api/manage/vault/credential")
 async def add_vault_credential(cred: CredentialItem):
-    agent_memory.store_credential(
-        service=cred.service,
-        username=cred.username,
-        secret=cred.secret,
-        extra=cred.extra
-    )
-    return {"success": True, "service": cred.service, "username": cred.username}
+    try:
+        agent_memory.store_credential(
+            service=cred.service,
+            username=cred.username,
+            secret=cred.secret,
+            extra=cred.extra,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, "service": cred.service, "username": cred.username, "secret": "••••••••"}
 
 @app.delete("/api/manage/vault/credential")
 async def delete_vault_credential(service: str, username: str):
-    creds = agent_memory.vault.get("credentials", [])
-    agent_memory.vault["credentials"] = [
-        c for c in creds if not (c.get("service") == service and c.get("username") == username)
-    ]
-    agent_memory.save()
+    deleted = agent_memory.delete_credential(service, username)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Credential not found.")
     return {"success": True, "service": service, "username": username}
 
 # Mount Static UI

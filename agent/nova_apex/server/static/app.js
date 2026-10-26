@@ -1,3 +1,10 @@
+// Same-origin request helper: mutation requests carry a per-app marker.
+async function apiFetch(input, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("X-Nova-Apex-Request", "1");
+  return window.fetch(input, { ...init, headers, credentials: "same-origin" });
+}
+
 // NOVA-APEX Mission Control Dynamic Client Engine
 let socket = null;
 let isPaused = false;
@@ -126,7 +133,7 @@ async function submitGoal() {
   showToast("Dispatching mission to NOVA-APEX engine...");
 
   try {
-    const res = await fetch("/api/goal", {
+    const res = await apiFetch("/api/goal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt })
@@ -150,7 +157,7 @@ async function submitGoal() {
 async function togglePause() {
   const endpoint = isPaused ? "/api/resume" : "/api/pause";
   try {
-    const res = await fetch(endpoint, { method: "POST" });
+    const res = await apiFetch(endpoint, { method: "POST" });
     if (res.ok) {
       isPaused = !isPaused;
       document.getElementById("btn-pause").innerHTML = isPaused ? 
@@ -166,7 +173,7 @@ async function togglePause() {
 async function abortGoal() {
   if (confirm("Are you sure you want to abort the active mission?")) {
     try {
-      await fetch("/api/abort", { method: "POST" });
+      await apiFetch("/api/abort", { method: "POST" });
       showToast("Mission aborted.");
       pollStatus();
     } catch (e) {
@@ -190,7 +197,7 @@ async function directNavigate() {
   updateDomainBadge("BROWSER: NAVIGATING");
 
   try {
-    const res = await fetch("/api/browser/navigate", {
+    const res = await apiFetch("/api/browser/navigate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url })
@@ -212,7 +219,7 @@ async function directNavigate() {
 async function directBrowserAction(action, target = null) {
   showToast(`Dispatching browser action: ${action}...`);
   try {
-    const res = await fetch("/api/browser/action", {
+    const res = await apiFetch("/api/browser/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, target })
@@ -229,7 +236,7 @@ async function directBrowserAction(action, target = null) {
 
 async function toggleBrowserVisibility() {
   try {
-    const res = await fetch("/api/browser/toggle-mode", { method: "POST" });
+    const res = await apiFetch("/api/browser/toggle-mode", { method: "POST" });
     const data = await res.json();
     const btn = document.getElementById("btn-browser-mode");
     if (data.headless) {
@@ -248,7 +255,7 @@ async function toggleBrowserVisibility() {
 // --- Polling & Render Engine ---
 async function pollStatus() {
   try {
-    const res = await fetch("/api/status");
+    const res = await apiFetch("/api/status");
     const data = await res.json();
     renderStatus(data);
   } catch (e) {}
@@ -318,21 +325,29 @@ function renderStatus(data) {
 
   counter.innerText = `${completedCount} / ${data.steps.length} Milestones`;
 
-  stepsList.innerHTML = "";
+  stepsList.replaceChildren();
   data.steps.forEach(step => {
     const card = document.createElement("div");
-    card.className = `step-card ${step.status}`;
-
-    card.innerHTML = `
-      <div class="step-info">
-        <div class="step-title-line">
-          <span class="step-number">#${step.step_id}</span>
-          <span class="step-title">${step.title}</span>
-        </div>
-        <span class="step-desc">${step.description}</span>
-      </div>
-      <div class="step-badge ${step.status}">${step.status}</div>
-    `;
+    card.className = `step-card ${String(step.status || "pending").replace(/[^a-z_]/g, "")}`;
+    const info = document.createElement("div");
+    info.className = "step-info";
+    const titleLine = document.createElement("div");
+    titleLine.className = "step-title-line";
+    const number = document.createElement("span");
+    number.className = "step-number";
+    number.textContent = `#${step.step_id}`;
+    const title = document.createElement("span");
+    title.className = "step-title";
+    title.textContent = String(step.title || "Untitled step");
+    titleLine.append(number, title);
+    const description = document.createElement("span");
+    description.className = "step-desc";
+    description.textContent = String(step.description || "");
+    info.append(titleLine, description);
+    const badge = document.createElement("div");
+    badge.className = `step-badge ${String(step.status || "pending").replace(/[^a-z_]/g, "")}`;
+    badge.textContent = String(step.status || "pending");
+    card.append(info, badge);
     stepsList.appendChild(card);
 
     if (step.result && step.result.screenshot_path) {
@@ -363,7 +378,7 @@ function updateDomainBadge(text) {
 
 async function pollTelemetry() {
   try {
-    const res = await fetch("/api/telemetry");
+    const res = await apiFetch("/api/telemetry");
     const data = await res.json();
     document.getElementById("disk-info").innerText = `Free: ${data.free_disk_gb} GB`;
   } catch (e) {}
@@ -414,7 +429,7 @@ async function loadWorkspaceTree() {
   container.innerHTML = `<div class="empty-state">Loading workspace tree...</div>`;
 
   try {
-    const res = await fetch("/api/manage/workspace/tree");
+    const res = await apiFetch("/api/manage/workspace/tree");
     const data = await res.json();
     if (!data.items || data.items.length === 0) {
       container.innerHTML = `<div class="empty-state">Workspace is empty. Create a file above or execute a mission.</div>`;
@@ -461,7 +476,7 @@ async function openWorkspaceFile(path) {
   });
 
   try {
-    const res = await fetch(`/api/manage/workspace/file?path=${encodeURIComponent(path)}`);
+    const res = await apiFetch(`/api/manage/workspace/file?path=${encodeURIComponent(path)}`);
     if (res.ok) {
       const data = await res.json();
       editor.value = data.content;
@@ -484,7 +499,7 @@ async function saveActiveFile() {
 
   const content = document.getElementById("file-editor-content").value;
   try {
-    const res = await fetch("/api/manage/workspace/file", {
+    const res = await apiFetch("/api/manage/workspace/file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: activeFilePath, content })
@@ -509,7 +524,7 @@ async function deleteActiveFile() {
   if (!confirm(`Are you sure you want to permanently delete '${activeFilePath}'?`)) return;
 
   try {
-    const res = await fetch(`/api/manage/workspace/file?path=${encodeURIComponent(activeFilePath)}`, {
+    const res = await apiFetch(`/api/manage/workspace/file?path=${encodeURIComponent(activeFilePath)}`, {
       method: "DELETE"
     });
     if (res.ok) {
@@ -533,7 +548,7 @@ async function loadWindowsList() {
   tbody.innerHTML = `<tr><td colspan="3" class="empty-state">Scanning active windows...</td></tr>`;
 
   try {
-    const res = await fetch("/api/manage/windows");
+    const res = await apiFetch("/api/manage/windows");
     const data = await res.json();
     if (!data.windows || data.windows.length === 0) {
       tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No visible windows found.</td></tr>`;
@@ -560,7 +575,7 @@ async function loadWindowsList() {
 
 async function focusWindow(hwnd) {
   try {
-    const res = await fetch("/api/manage/windows/focus", {
+    const res = await apiFetch("/api/manage/windows/focus", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hwnd })
@@ -579,7 +594,7 @@ async function focusWindow(hwnd) {
 async function closeWindow(hwnd) {
   if (!confirm(`Send WM_CLOSE signal to HWND ${hwnd}?`)) return;
   try {
-    const res = await fetch("/api/manage/windows/close", {
+    const res = await apiFetch("/api/manage/windows/close", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hwnd })
@@ -602,7 +617,7 @@ async function loadProcessList() {
   tbody.innerHTML = `<tr><td colspan="3" class="empty-state">Inspecting running processes...</td></tr>`;
 
   try {
-    const res = await fetch("/api/manage/processes");
+    const res = await apiFetch("/api/manage/processes");
     const data = await res.json();
     if (!data.processes || data.processes.length === 0) {
       tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No process data available.</td></tr>`;
@@ -631,7 +646,7 @@ async function loadMobileDetails() {
   card.innerHTML = `<div class="empty-state">Querying ADB hardware telemetry...</div>`;
 
   try {
-    const res = await fetch("/api/manage/mobile/info");
+    const res = await apiFetch("/api/manage/mobile/info");
     const data = await res.json();
     if (!data.connected) {
       card.innerHTML = `
@@ -671,7 +686,7 @@ async function loadMobileDetails() {
 async function sendMobileKey(keycode) {
   showToast(`Dispatching ADB Keycode: ${keycode}...`);
   try {
-    const res = await fetch("/api/manage/mobile/keyevent", {
+    const res = await apiFetch("/api/manage/mobile/keyevent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ keycode })
@@ -691,22 +706,14 @@ async function scanMobileOTP() {
   const box = document.getElementById("otp-interceptor-box");
   box.innerHTML = `<p>Scanning notification stream for 2FA / OTP codes...</p>`;
   try {
-    const res = await fetch("/api/manage/mobile/otp");
+    const res = await apiFetch("/api/manage/mobile/otp");
     const data = await res.json();
     if (data.connected && data.otp) {
-      box.innerHTML = `
-        <p style="color: var(--accent-green); font-weight: 700;">INTERCEPTED 2FA CODE</p>
-        <div class="otp-code-display">${escapeHtml(data.otp)}</div>
-        <div class="otp-timestamp">Source: Device ${escapeHtml(data.device)} • Just now</div>
-        <button class="btn-sm" onclick="navigator.clipboard.writeText('${data.otp}'); showToast('OTP copied to clipboard!');">📋 Copy OTP Code</button>
-      `;
-      showToast(`2FA Code Detected: ${data.otp}`);
+      box.textContent = "Automatic OTP extraction is disabled. Enter verification codes directly in the intended service.";
+      showToast("Automatic OTP extraction is disabled.");
     } else {
-      box.innerHTML = `
-        <p>No new 2FA / verification codes found in notification stream.</p>
-        <span class="sub-text">Send an SMS or trigger a 2FA prompt to the connected device and click Scan.</span>
-      `;
-      showToast(data.message || "No OTP codes found.");
+      box.textContent = "For security, NOVA-APEX does not read, display, or relay verification codes. Enter any code directly into the service you are signing in to.";
+      showToast("Automatic OTP extraction is disabled.");
     }
   } catch (e) {
     box.innerHTML = `<p>Error scanning for OTP: ${e}</p>`;
@@ -720,7 +727,7 @@ async function loadVaultTable() {
   tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Querying secure vault...</td></tr>`;
 
   try {
-    const res = await fetch("/api/vault");
+    const res = await apiFetch("/api/vault");
     const data = await res.json();
     const creds = data.credentials || [];
     const accounts = data.created_accounts || [];
@@ -742,19 +749,32 @@ async function loadVaultTable() {
       return;
     }
 
-    tbody.innerHTML = "";
+    tbody.replaceChildren();
     allEntries.forEach(item => {
       const tr = document.createElement("tr");
-      const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString() : '--';
-      tr.innerHTML = `
-        <td><span class="badge-tag cyan">${escapeHtml(item.service)}</span></td>
-        <td style="font-weight: 600;">👤 ${escapeHtml(item.username)}</td>
-        <td><code>${escapeHtml(item.secret || '••••••••')}</code></td>
-        <td style="color: var(--text-muted); font-size: 10px;">${timeStr}</td>
-        <td>
-          <button class="btn-danger-sm" onclick="deleteVaultEntry('${escapeHtml(item.service)}', '${escapeHtml(item.username)}')">🗑️ Delete</button>
-        </td>
-      `;
+      const serviceCell = document.createElement("td");
+      const serviceBadge = document.createElement("span");
+      serviceBadge.className = "badge-tag cyan";
+      serviceBadge.textContent = String(item.service || "");
+      serviceCell.appendChild(serviceBadge);
+      const userCell = document.createElement("td");
+      userCell.style.fontWeight = "600";
+      userCell.textContent = `👤 ${String(item.username || "")}`;
+      const secretCell = document.createElement("td");
+      const secretCode = document.createElement("code");
+      secretCode.textContent = "••••••••";
+      secretCell.appendChild(secretCode);
+      const timeCell = document.createElement("td");
+      timeCell.style.color = "var(--text-muted)";
+      timeCell.style.fontSize = "10px";
+      timeCell.textContent = item.timestamp ? new Date(item.timestamp).toLocaleString() : "--";
+      const actionCell = document.createElement("td");
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "btn-danger-sm";
+      deleteButton.textContent = "🗑️ Delete";
+      deleteButton.addEventListener("click", () => deleteVaultEntry(String(item.service || ""), String(item.username || "")));
+      actionCell.appendChild(deleteButton);
+      tr.append(serviceCell, userCell, secretCell, timeCell, actionCell);
       tbody.appendChild(tr);
     });
   } catch (e) {
@@ -765,7 +785,7 @@ async function loadVaultTable() {
 async function deleteVaultEntry(service, username) {
   if (!confirm(`Delete credential for ${service} (${username})?`)) return;
   try {
-    const res = await fetch(`/api/manage/vault/credential?service=${encodeURIComponent(service)}&username=${encodeURIComponent(username)}`, {
+    const res = await apiFetch(`/api/manage/vault/credential?service=${encodeURIComponent(service)}&username=${encodeURIComponent(username)}`, {
       method: "DELETE"
     });
     if (res.ok) {
@@ -807,7 +827,7 @@ function setupInteractiveViewport() {
     showToast(`Dispatching Direct Click at (${normX}, ${normY}) on ${domainText}`);
 
     try {
-      const res = await fetch("/api/interact/click", {
+      const res = await apiFetch("/api/interact/click", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ x: normX, y: normY, domain: domainText.includes("browser") ? "browser" : "desktop" })

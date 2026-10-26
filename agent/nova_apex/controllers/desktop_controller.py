@@ -234,6 +234,8 @@ class DesktopController:
 
             elif action_type == "delete_file":
                 file_path = self._resolve_path(action.target)
+                if file_path.resolve() == settings.workspace_dir.resolve():
+                    return StepResult(action_id=action.action_id, success=False, error="Refusing to delete the workspace root.")
                 if file_path.exists():
                     if file_path.is_file():
                         file_path.unlink()

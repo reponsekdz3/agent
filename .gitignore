@@ -1,0 +1,21 @@
+# Secrets and local runtime state
+**/.env
+!**/.env.example
+**/data/artifacts/*
+**/data/browser_profiles/*
+**/data/logs/*
+
+# Python
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node and tools
+node_modules/
+
+# Local workstation artifacts
+*.lnk
+Thumbs.db
+.DS_Store

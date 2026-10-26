@@ -17,17 +17,36 @@ class ShellController:
         self.workspace_dir = settings.workspace_dir
 
     async def execute_action(self, action: ActionRequest) -> StepResult:
+        if not settings.allow_shell_execution:
+            return StepResult(
+                action_id=action.action_id,
+                success=False,
+                error="Shell execution is disabled by default. Review the command and set ALLOW_SHELL_EXECUTION=true in your local .env to enable it.",
+            )
+
         cmd_text = agent_memory.resolve_placeholders(action.value or action.target or "")
-        agent_logger.action(f"Executing shell command: {cmd_text[:120]}...", domain="SHELL")
+        if not cmd_text.strip():
+            return StepResult(action_id=action.action_id, success=False, error="A non-empty shell command is required.")
+        agent_logger.action("Executing shell command (explicit local opt-in enabled).", domain="SHELL")
 
         try:
-            # Use PowerShell on Windows
-            proc = await asyncio.create_subprocess_shell(
-                f"powershell -Command \"{cmd_text}\"",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workspace_dir)
-            )
+            # Pass the command as a single argv element; never interpolate it into
+            # a second shell command string.
+            import os
+            if os.name == "nt":
+                proc = await asyncio.create_subprocess_exec(
+                    "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", cmd_text,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.workspace_dir),
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    "/bin/bash", "-lc", cmd_text,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.workspace_dir),
+                )
 
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=action.timeout_seconds)

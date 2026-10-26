@@ -4,12 +4,12 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
+from urllib.parse import urlsplit
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from nova_apex.config.settings import settings
 from nova_apex.core.logger import agent_logger
 from nova_apex.core.schemas import StepResult, ActionRequest
 from nova_apex.core.memory import agent_memory
-from nova_apex.controllers.stealth_profile import STEALTH_EVASION_SCRIPT, generate_bezier_curve
 
 class BrowserController:
     """
@@ -52,79 +52,37 @@ class BrowserController:
             except Exception as e:
                 agent_logger.warning(f"CDP connection to {endpoint} failed ({e}). Spawning standalone stealth instance.", domain="BROWSER")
 
-        # Standard standalone launch with advanced bot-evasion flags
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process",
-            "--disable-infobars",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-accelerated-2d-canvas",
-            "--no-first-run",
-            "--no-zygote",
-            "--window-size=1440,900"
-        ]
-
-        # Select browser driver
+        # Use ordinary, observable Playwright automation without fingerprint spoofing.
         if browser_type.lower() == "firefox":
             self.browser = await self.playwright.firefox.launch(headless=settings.browser_headless)
         elif browser_type.lower() == "webkit":
             self.browser = await self.playwright.webkit.launch(headless=settings.browser_headless)
         else:
-            self.browser = await self.playwright.chromium.launch(
-                headless=settings.browser_headless,
-                args=launch_args
-            )
+            self.browser = await self.playwright.chromium.launch(headless=settings.browser_headless)
 
-        storage_path = str(self.state_file) if self.state_file.exists() else None
-
-        user_agent = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36"
-        )
-
+        storage_path = str(self.state_file) if settings.browser_persist_session and self.state_file.exists() else None
         self.context = await self.browser.new_context(
-            user_agent=user_agent,
             viewport={"width": settings.browser_viewport_width, "height": settings.browser_viewport_height},
             device_scale_factor=1.0,
             locale="en-US",
-            timezone_id="America/New_York",
-            has_touch=False,
-            is_mobile=False,
-            storage_state=storage_path
+            storage_state=storage_path,
         )
-
-        # Inject comprehensive stealth evasion scripts
-        await self.context.add_init_script(STEALTH_EVASION_SCRIPT)
-
         self.page = await self.context.new_page()
         self._is_initialized = True
-        agent_logger.success("Ultra-Stealth browser subsystem online & hardened against bot-detection.", domain="BROWSER")
+        agent_logger.success("Standard Playwright browser subsystem initialized.", domain="BROWSER")
 
     async def human_mouse_move(self, target_x: float, target_y: float):
         """
         Executes human-like mouse movement along a randomized Bézier curve trajectory.
         """
-        curve = generate_bezier_curve(self._cursor_pos, (target_x, target_y), num_points=18)
-        for pt in curve:
-            await self.page.mouse.move(pt[0], pt[1])
-            await asyncio.sleep(random.uniform(0.005, 0.015))
+        await self.page.mouse.move(target_x, target_y)
         self._cursor_pos = (target_x, target_y)
 
     async def human_type(self, selector: str, text: str):
         """
         Types text with realistic Gaussian latency and occasional human cadence pauses.
         """
-        await self.page.focus(selector)
-        for char in text:
-            await self.page.keyboard.type(char)
-            # Gaussian delay around 65ms, occasionally slower
-            delay = max(0.02, random.gauss(0.065, 0.025))
-            if char in " .,@_#-":
-                delay += random.uniform(0.05, 0.12)  # Pause naturally on punctuation
-            await asyncio.sleep(delay)
+        await self.page.locator(selector).fill(text)
 
     async def execute_action(self, action: ActionRequest) -> StepResult:
         await self.initialize()
@@ -132,17 +90,17 @@ class BrowserController:
 
         try:
             if action_type == "navigate":
-                url = agent_memory.resolve_placeholders(action.target or action.value)
-                if not url.startswith("http://") and not url.startswith("https://"):
-                    url = f"https://{url}"
-                agent_logger.action(f"Stealth navigating to {url}", domain="BROWSER")
+                raw_url = agent_memory.resolve_placeholders(action.target or action.value or "").strip()
+                if "://" not in raw_url:
+                    raw_url = f"https://{raw_url}"
+                parsed_url = urlsplit(raw_url)
+                if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+                    return StepResult(action_id=action.action_id, success=False, error="Navigation only supports valid http:// and https:// URLs.")
+                url = parsed_url.geturl()
+                agent_logger.action(f"Navigating to {url}", domain="BROWSER")
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=action.timeout_seconds * 1000)
-                await asyncio.sleep(random.uniform(1.0, 1.8))  # Human settling delay
-                # Save session cookies
-                try:
+                if settings.browser_persist_session:
                     await self.context.storage_state(path=str(self.state_file))
-                except Exception:
-                    pass
                 shot_path = await self.take_screenshot("nav_success")
                 return StepResult(
                     action_id=action.action_id,
@@ -156,23 +114,15 @@ class BrowserController:
                 selector = action.target
                 agent_logger.action(f"Locating & human-clicking element: {selector}", domain="BROWSER")
                 
-                # Check if target is coordinate "x,y"
+                if not selector:
+                    return StepResult(action_id=action.action_id, success=False, error="A browser selector is required.")
                 if "," in selector and all(p.strip().isdigit() for p in selector.replace("(", "").replace(")", "").split(",")):
                     coords = [int(p.strip()) for p in selector.replace("(", "").replace(")", "").split(",")]
-                    await self.human_mouse_move(coords[0], coords[1])
-                    await self.page.mouse.click(coords[0], coords[1], delay=random.randint(40, 90))
+                    if len(coords) != 2:
+                        return StepResult(action_id=action.action_id, success=False, error="Coordinates must use x,y format.")
+                    await self.page.mouse.click(coords[0], coords[1])
                 else:
-                    el = await self.page.wait_for_selector(selector, state="visible", timeout=action.timeout_seconds * 1000)
-                    box = await el.bounding_box()
-                    if box:
-                        target_x = box["x"] + box["width"] / 2 + random.uniform(-4, 4)
-                        target_y = box["y"] + box["height"] / 2 + random.uniform(-4, 4)
-                        await self.human_mouse_move(target_x, target_y)
-                        await self.page.mouse.click(target_x, target_y, delay=random.randint(40, 90))
-                    else:
-                        await el.click(delay=random.randint(40, 90))
-
-                await asyncio.sleep(random.uniform(0.4, 0.8))
+                    await self.page.locator(selector).click(timeout=action.timeout_seconds * 1000)
                 shot = await self.take_screenshot("click_result")
                 return StepResult(action_id=action.action_id, success=True, output=f"Human-clicked {selector}", screenshot_path=shot)
 
@@ -184,15 +134,7 @@ class BrowserController:
                 agent_logger.action(f"Human-typing into {selector}: {masked_repr}", domain="BROWSER")
                 
                 el = await self.page.wait_for_selector(selector, state="visible", timeout=action.timeout_seconds * 1000)
-                box = await el.bounding_box()
-                if box:
-                    await self.human_mouse_move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-                    await self.page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-                else:
-                    await el.click()
-                
-                await self.page.fill(selector, "")
-                await self.human_type(selector, text_to_type)
+                await self.page.locator(selector).fill(text_to_type, timeout=action.timeout_seconds * 1000)
                 shot = await self.take_screenshot("type_result")
                 return StepResult(action_id=action.action_id, success=True, output=f"Typed text into {selector}", screenshot_path=shot)
 
@@ -228,114 +170,56 @@ class BrowserController:
             return StepResult(action_id=action.action_id, success=False, error=str(e), screenshot_path=shot)
 
     async def auto_fill_registration(self, action: ActionRequest) -> StepResult:
-        """
-        Autonomous Multi-Stage Registration Engine:
-        Analyzes form fields, generates secure realistic credentials, fills with human cadence,
-        and saves credentials to the secure vault.
-        """
-        agent_logger.info("Scanning page for registration fields...", domain="BROWSER")
-        import string
+        """Prepare a signup form with explicit user inputs; never submit it.
 
-        rand_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        generated_username = f"nova_agent_{rand_id}"
-        generated_email = f"nova_agent_{rand_id}@inboxnova.org"
-        generated_password = f"NovaApex#2026_{''.join(random.choices(string.ascii_letters + string.digits, k=8))}"
+        The operator must inspect the destination and manually accept terms and
+        complete the site's verification workflow. Credentials are never logged
+        or persisted by this method.
+        """
+        if not self.page:
+            return StepResult(action_id=action.action_id, success=False, error="No active browser page.")
+        params = action.params or {}
+        email = str(params.get("email") or "").strip()
+        username = str(params.get("username") or "").strip()
+        password = str(params.get("password") or "")
+        if not any((email, username, password)):
+            return StepResult(
+                action_id=action.action_id,
+                success=False,
+                error="Provide at least one user-owned signup field in params (email, username, password). No synthetic identity will be generated.",
+            )
 
         fields_filled = []
+        selectors = []
+        if email:
+            selectors.append(("email", ["input[type='email']", "input[name*='email' i]", "input[id*='email' i]", "input[autocomplete='email']"], email))
+        if username:
+            selectors.append(("username", ["input[name*='user' i]", "input[id*='user' i]", "input[name*='login' i]", "input[placeholder*='username' i]", "input[name='name']"], username))
+        if password:
+            selectors.append(("password", ["input[type='password']"], password))
 
-        # Find email field
-        email_selectors = [
-            "input[type='email']", "input[name*='email' i]", "input[id*='email' i]",
-            "input[placeholder*='email' i]", "input[autocomplete='email']"
-        ]
-        for sel in email_selectors:
-            if await self.page.is_visible(sel):
-                await self.human_type(sel, generated_email)
-                fields_filled.append(f"Email ({sel}) -> {generated_email}")
-                break
-
-        # Find username / name field
-        user_selectors = [
-            "input[name*='user' i]", "input[id*='user' i]", "input[name*='login' i]",
-            "input[placeholder*='username' i]", "input[name='name']"
-        ]
-        for sel in user_selectors:
-            if await self.page.is_visible(sel):
-                await self.human_type(sel, generated_username)
-                fields_filled.append(f"Username ({sel}) -> {generated_username}")
-                break
-
-        # Find password fields
-        pass_selectors = [
-            "input[type='password']", "input[name*='pass' i]", "input[id*='pass' i]"
-        ]
-        pass_inputs = await self.page.query_selector_all("input[type='password']")
-        if pass_inputs:
-            for p in pass_inputs:
+        for label, candidates, value in selectors:
+            filled = False
+            for selector in candidates:
+                locator = self.page.locator(selector).first
                 try:
-                    box = await p.bounding_box()
-                    if box:
-                        await self.human_mouse_move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-                        await p.click()
-                        await self.page.keyboard.type(generated_password)
-                        fields_filled.append("Password input filled")
+                    if await locator.is_visible():
+                        await locator.fill(value, timeout=action.timeout_seconds * 1000)
+                        fields_filled.append(label)
+                        filled = True
+                        break
                 except Exception:
-                    pass
-        else:
-            for sel in pass_selectors:
-                if await self.page.is_visible(sel):
-                    await self.human_type(sel, generated_password)
-                    fields_filled.append(f"Password ({sel})")
-                    break
+                    continue
+            if not filled:
+                agent_logger.warning(f"No visible {label} field found; leaving it for manual entry.", domain="BROWSER")
 
-        # Accept terms checkbox if present
-        checkboxes = await self.page.query_selector_all("input[type='checkbox']")
-        for cb in checkboxes:
-            try:
-                if not await cb.is_checked():
-                    await cb.check()
-                    fields_filled.append("Agreed to terms checkbox")
-            except Exception:
-                pass
-
-        # Save to memory vault
-        current_url = self.page.url
-        service_name = current_url.split("//")[-1].split("/")[0]
-        agent_memory.store_credential(
-            service=service_name,
-            username=generated_username,
-            secret=generated_password,
-            extra={"email": generated_email, "url": current_url, "fields": fields_filled}
-        )
-
-        shot = await self.take_screenshot("form_filled")
-
-        # Submit button detection
-        submit_btn = await self.page.query_selector(
-            "button[type='submit'], input[type='submit'], button:has-text('Sign up'), button:has-text('Register'), button:has-text('Continue')"
-        )
-        if submit_btn:
-            try:
-                box = await submit_btn.bounding_box()
-                if box:
-                    await self.human_mouse_move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-                await submit_btn.click()
-                await asyncio.sleep(2)
-                agent_logger.success("Clicked registration submit button.", domain="BROWSER")
-            except Exception as e:
-                agent_logger.warning(f"Could not auto-click submit: {e}", domain="BROWSER")
-
+        screenshot = await self.take_screenshot("signup_review")
         return StepResult(
             action_id=action.action_id,
             success=True,
-            output=f"Auto-filled account registration fields on {service_name}. Credentials persisted to vault.",
-            screenshot_path=shot,
-            data={
-                "service": service_name,
-                "username": generated_username,
-                "email": generated_email,
-                "fields_filled": fields_filled
-            }
+            output="Provided signup fields prepared. No terms were accepted, no form was submitted, and no credentials were saved.",
+            screenshot_path=screenshot,
+            data={"url": self.page.url, "fields_filled": fields_filled, "requires_user_review": True, "submitted": False},
         )
 
     async def extract_interactive_elements(self) -> Dict[str, Any]:

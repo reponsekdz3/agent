@@ -96,29 +96,13 @@ class MobileController:
 
     # --- Auto 2FA / OTP Code Interceptor ---
     def extract_latest_otp(self, device_id: str) -> Optional[str]:
-        """
-        Inspects Android notification logs and recent messages to extract 4-to-8 digit OTP verification codes.
-        """
-        base_cmd = [self.adb_bin, "-s", device_id]
-        agent_logger.info("Scanning mobile notifications for 2FA verification codes...", domain="MOBILE")
+        """Automatic OTP extraction is intentionally disabled.
 
-        try:
-            # Check dumpsys notification
-            res = subprocess.run(base_cmd + ["shell", "dumpsys", "notification", "--noredact"], capture_output=True, text=True, timeout=8)
-            output = res.stdout
-
-            # Match standard OTP phrases
-            # e.g., "Your code is 123456", "OTP: 9876", "Use 543210 to verify"
-            otp_matches = re.findall(r"(?:code|otp|verification|verify|pin|passcode)[^\d]{1,15}(\b\d{4,8}\b)", output, re.IGNORECASE)
-            if otp_matches:
-                latest_code = otp_matches[-1]
-                agent_memory.set_working("latest_otp", latest_code)
-                agent_logger.success(f"INTERCEPTED 2FA VERIFICATION CODE: [{latest_code}]", domain="MOBILE")
-                return latest_code
-            return None
-        except Exception as e:
-            agent_logger.warning(f"Failed to scan notifications: {e}", domain="MOBILE")
-            return None
+        Verification codes are security credentials; the user should enter them
+        directly into the site or app they are authenticating with.
+        """
+        agent_logger.warning("Automatic OTP extraction is disabled; use the service's normal verification flow.", domain="MOBILE")
+        return None
 
     def execute_action(self, action: ActionRequest) -> StepResult:
         if not self.adb_bin:
@@ -184,10 +168,11 @@ class MobileController:
                 return StepResult(action_id=action.action_id, success=True, output=f"Sent keyevent {keycode} to {target_device}")
 
             elif action_type == "adb_extract_otp":
-                otp = self.extract_latest_otp(target_device)
-                if otp:
-                    return StepResult(action_id=action.action_id, success=True, output=f"Intercepted OTP: {otp}", data={"otp": otp})
-                return StepResult(action_id=action.action_id, success=False, error="No active OTP detected in notification log")
+                return StepResult(
+                    action_id=action.action_id,
+                    success=False,
+                    error="Automatic OTP extraction is disabled. Enter verification codes manually in the intended service.",
+                )
 
             elif action_type == "adb_screenshot":
                 shot = self.take_screenshot(target_device, "mobile_screen")

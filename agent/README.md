@@ -1,130 +1,95 @@
-# ⚡ NOVA-APEX // Universal Autonomous Automation OS
+# NOVA-APEX — Local-first computer-use agent
 
-> **Production-Grade Next-Gen Cross-Platform Computer-Use & Web Automation Agent System**  
-> Operates across **Web Browsers (Playwright Stealth)**, **Desktop GUI (Windows / PyAutoGUI)**, **Mobile Devices (Android ADB)**, and **Terminal Shell**.
+NOVA-APEX is a Python agent for user-directed browser, desktop, filesystem, Android ADB, and shell workflows. Its planner can use supported hosted or local language-model providers, while the FastAPI Mission Control dashboard reports mission progress.
 
----
+This project is under active hardening. Treat it as a local automation tool, not as a production-hardened remote agent. **Do not expose Mission Control to the public internet.** Keep the dashboard bound to loopback and use an isolated machine or VM for high-impact automation.
 
-## 🌟 Key Capabilities
+## Design principles
 
-### 1. 🌐 Autonomous Web & Internet Engine
-- **Stealth Playwright Automation:** Automated Chromium browser with bot-evasion fingerprints, stealth webdriver masking, and human typing cadence.
-- **Auto Account Creation & Form Filling:** Automatically scans DOM for registration inputs (`email`, `username`, `password`, `terms`), synthesizes persona credentials, fills inputs, and clicks submit.
-- **Visual Verification & Snapshots:** Real-time DOM extraction, accessibility tree grounding, and full-page viewport screenshots.
-- **Credential Vault Integration:** Automatically persists generated credentials, tokens, and cookies to `data/artifacts/agent_memory_vault.json`.
+- **Human control:** the agent prepares actions and reports outcomes; site signup, legal consent, account verification, payments, and other sensitive confirmation steps remain with the user.
+- **Safe defaults:** shell commands and destructive filesystem actions are disabled unless explicitly enabled in a local .env.
+- **Workspace boundaries:** file creation, reading, and deletion must resolve inside the configured workspace.
+- **Secret minimization:** the persistent vault stores metadata only. Secrets use the OS credential manager when available; if it is unavailable, secret values stay in process memory and are lost when the process exits.
+- **No session by default:** browser cookies/session state are neither loaded nor persisted unless BROWSER_PERSIST_SESSION=true is explicitly chosen.
+- **Visible, standard automation:** Playwright uses normal browser behavior rather than browser-fingerprint spoofing or anti-bot evasion.
+- **Honest completion:** an empty plan or a planner error is a failed mission, not a successful one.
 
-### 2. 🖥️ Desktop OS & Computer-Use Engine
-- **GUI Interaction:** Precise mouse moves, single/double clicks, drags, and keystrokes with hardware-level failsafe protection.
-- **Multimodal Visual Grounding:** Captures desktop state snapshots for AI vision models.
-- **Complete Filesystem Manipulation:** Creates folders, reads/writes code files, generates project scaffolds, and searches workspace directories.
+## Requirements
 
-### 3. 📱 Mobile Device Engine (Android ADB)
-- **Auto-Discovery:** Automatically detects connected Android physical devices and emulators over USB or TCP/IP.
-- **Remote Mobile Control:** ADB tap, swipe gestures, text input, and hardware keyevents (Home, Back, Enter, App Switcher).
-- **UI Automator Dump:** Pulls mobile XML hierarchy dumps and direct frame buffer screenshots.
+- Python 3.11 or newer
+- A model API key for hosted reasoning, or an Ollama service and locally available model
+- Playwright browser installation for browser workflows
+- Windows for native GUI controls; Android SDK Platform Tools for ADB actions
 
-### 4. 🧠 Autonomous Cognitive Architecture
-- **Hierarchical Planner:** Converts high-level natural language prompts into executable DAG milestone graphs.
-- **Dynamic Self-Healing:** Catches runtime failures and automatically invokes the replanner to synthesize alternate paths.
-- **Dual-Tier Memory System:** Short-term scratchpad with variable expansion (`${username}`, `${password}`) + Persistent Long-term Knowledge Vault.
-- **Multi-Model Provider:** Built-in support for Google Gemini, OpenAI (GPT-4o), Anthropic Claude, Ollama, and an Autonomous Heuristic Engine fallback.
+## Setup (Windows PowerShell)
 
-### 5. 🎛️ Real-Time Mission Control Web Dashboard
-- Cybernetic dark glassmorphic UI running on FastAPI & WebSockets.
-- Live stream of agent thinking, perception viewport, step milestone graphs, and account vault.
+From the repository root:
 
----
+~~~powershell
+cd .\agent
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+Copy-Item .env.example .env
+playwright install chromium
+~~~
 
-## 🚀 Quick Start Guide
+Edit .env locally and add the model provider key you intend to use. Never commit .env, browser-session state, screenshots, logs, or vault data.
 
-### 1. Activate Environment & Run Web Dashboard
-```powershell
-# Activate virtual environment
-.\venv\Scripts\Activate.ps1
+## Run Mission Control
 
-# Launch Mission Control Web UI
+~~~powershell
 python main.py --server --port 8000
-```
-Open **[http://localhost:8000](http://localhost:8000)** in your browser.
+~~~
 
-### 2. Run Interactive Terminal CLI
-```powershell
+Open <http://127.0.0.1:8000>. The API defaults to loopback-only access, checks Host and browser Origin, and disables credentials in CORS. Do not set SERVER_HOST=0.0.0.0 or tunnel this dashboard to an untrusted network.
+
+## Run a mission from the CLI
+
+~~~powershell
 python main.py
-```
+python main.py --goal "Open https://example.com and summarize the page"
+~~~
 
-### 3. Direct Headless Mission Execution
-```powershell
-# Create an automated account on GitHub
-python main.py --account-url "https://github.com/signup"
+For model configuration, set DEFAULT_LLM_PROVIDER to auto, gemini, openai, anthropic, or ollama. Configure the corresponding API key or local service. When no provider is available, a limited heuristic planner is used; it is not a substitute for model reasoning or verification.
 
-# Execute a complex multi-domain goal
-python main.py --goal "Scaffold fullstack app, create folders and files, capture desktop screenshot"
-```
+## High-impact permissions
 
----
+These switches are deliberately off by default:
 
-## 📁 System Architecture
+~~~dotenv
+ALLOW_SHELL_EXECUTION=false
+ALLOW_DESTRUCTIVE_ACTIONS=false
+~~~
 
-```
-agent/
-├── nova_apex/
-│   ├── config/
-│   │   └── settings.py              # Environment configuration & directory bindings
-│   ├── core/
-│   │   ├── engine.py                # Main Autonomous Orchestration Loop
-│   │   ├── planner.py               # Hierarchical Planner & Self-Healing Replanner
-│   │   ├── memory.py                # Dual-tier working memory & credential vault
-│   │   ├── llm_provider.py          # Multi-LLM provider & Heuristic fallback
-│   │   ├── logger.py                # Rich console & real-time WebSocket logger
-│   │   └── schemas.py               # Pydantic schemas (ActionRequest, StepResult, PlanStep)
-│   ├── controllers/
-│   │   ├── browser_controller.py    # Stealth Playwright browser automation
-│   │   ├── desktop_controller.py    # PyAutoGUI OS automation & filesystem operations
-│   │   ├── mobile_controller.py     # Android ADB mobile automation
-│   │   └── shell_controller.py      # PowerShell / Subprocess command runner
-│   ├── skills/
-│   │   ├── web_account_creator.py   # Multi-stage automated web registration
-│   │   ├── doc_generator.py         # Autonomous code & document generator
-│   │   ├── system_admin.py          # System telemetry & disk cleanup
-│   │   └── research_agent.py        # Autonomous deep web scraper & researcher
-│   ├── server/
-│   │   ├── app.py                   # FastAPI REST API & WebSocket endpoints
-│   │   ├── ws_manager.py            # Live real-time WebSocket pub/sub
-│   │   └── static/                  # Mission Control Web Dashboard (HTML/CSS/JS)
-│   └── cli.py                       # Terminal rich interactive CLI
-├── data/
-│   ├── artifacts/                   # Saved screenshots, reports, and credential vault
-│   └── logs/                        # Structured JSONL session audit traces
-├── workspace/                       # Safe isolated user workspace directory
-├── main.py                          # Unified launcher
-├── requirements.txt                 # Dependencies manifest
-└── .env                             # Configuration & API keys
-```
+Only enable them on a machine you control after reviewing the goal and commands. Enabling shell execution allows the agent to run commands with the current user's operating-system permissions. The workspace restriction is not a sandbox for shell commands. Use a VM or container with restricted permissions for untrusted tasks.
 
----
+The browser signup helper fills only details the user provides and stops for review. It does not synthesize a pretend identity, accept terms, submit the form, or retrieve OTP/2FA codes. Enter verification codes directly into the intended service.
 
-## ⚙️ Configuration (`.env`)
+## Architecture
 
-```ini
-# LLM Providers (Optional: system works out-of-the-box with heuristic engine)
-GEMINI_API_KEY=
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-OLLAMA_BASE_URL=http://localhost:11434
+- nova_apex/core/engine.py: mission lifecycle, execution, pause/abort handling
+- nova_apex/core/planner.py and llm_provider.py: plan creation and model adapters
+- nova_apex/core/memory.py: transient working state and metadata-only vault
+- nova_apex/security.py: canonical workspace path resolution
+- nova_apex/controllers/: Playwright, Windows desktop/filesystem, ADB and shell adapters
+- nova_apex/server/: local FastAPI API, WebSocket telemetry, static Mission Control UI
+- nova_apex/skills/: research, scaffolding, signup preparation and system telemetry helpers
+- tests/test_safety.py: non-destructive security and regression checks
 
-DEFAULT_LLM_PROVIDER=auto
-DEFAULT_MODEL=gemini-2.5-flash
+## Checks
 
-# Browser Settings
-BROWSER_HEADLESS=false
-BROWSER_STEALTH=true
-BROWSER_VIEWPORT_WIDTH=1280
-BROWSER_VIEWPORT_HEIGHT=800
+Run unit tests from this directory:
 
-# Mobile Settings (ADB)
-ADB_ENABLED=true
+~~~powershell
+python -m pytest -q tests/test_safety.py
+~~~
 
-# Server Settings
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
-```
+The legacy files test_system.py and test_low_level.py perform live browser/desktop/device operations and are not suitable for ordinary CI. Run them only on a dedicated test machine after inspecting the actions.
+
+## Security notes and recovery
+
+If an earlier version of this repository was used with real credentials, rotate any credential that may have been saved in the old JSON vault. Removing a file from the current branch does not remove it from Git history. Also revoke the browser session that was previously stored in data/browser_profiles/storage_state.json. The new secret-handling code migrates a legacy vault to metadata-only storage when it starts, but repository history must be handled separately if sensitive values were committed.
+
+This codebase is not yet a multi-user, internet-facing service. Before such a deployment, add authenticated identity, role-based/object-level authorization, encrypted secret management, an isolated worker execution model, rate limits, structured audit retention, and deployment-specific security review.

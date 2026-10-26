@@ -1,9 +1,11 @@
 import os
+import re
 from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime
 from nova_apex.config.settings import settings
 from nova_apex.core.logger import agent_logger
+from nova_apex.security import resolve_inside
 
 class DocumentGeneratorSkill:
     """
@@ -15,14 +17,14 @@ class DocumentGeneratorSkill:
         """
         Takes a dict of {relative_path: content} and scaffolds the entire project tree.
         """
-        base_dir = settings.workspace_dir / project_name
+        base_dir = resolve_inside(settings.workspace_dir, project_name)
         base_dir.mkdir(parents=True, exist_ok=True)
         created_files = []
 
         agent_logger.info(f"Scaffolding project '{project_name}' in workspace...", domain="SKILL")
 
         for rel_path, content in structure.items():
-            target = base_dir / rel_path
+            target = resolve_inside(base_dir, rel_path)
             target.parent.mkdir(parents=True, exist_ok=True)
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -40,7 +42,8 @@ class DocumentGeneratorSkill:
         """
         Generates a markdown audit/execution report.
         """
-        filename = f"Report_{title.replace(' ', '_')}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.md"
+        safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", title).strip("._")[:80] or "Report"
+        filename = f"Report_{safe_title}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.md"
         out_path = settings.artifacts_dir / filename
 
         lines = [

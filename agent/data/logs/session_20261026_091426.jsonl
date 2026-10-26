@@ -1,2 +1,0 @@
-{"timestamp": "2026-10-26T09:14:26.511113", "level": "INFO", "domain": "DESKTOP", "message": "Desktop GUI controller initialized. Screen size: 2560x1440", "data": {}}
-{"timestamp": "2026-10-26T09:14:26.741125", "level": "INFO", "domain": "SKILL", "message": "System Telemetry: OS Windows (AMD64) | Disk Free: 76.15 GB", "data": {}}

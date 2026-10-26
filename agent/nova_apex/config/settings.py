@@ -18,7 +18,8 @@ class SystemSettings(BaseModel):
 
     # Browser Automation
     browser_headless: bool = Field(default_factory=lambda: os.getenv("BROWSER_HEADLESS", "false").lower() == "true")
-    browser_stealth: bool = Field(default_factory=lambda: os.getenv("BROWSER_STEALTH", "true").lower() == "true")
+    browser_stealth: bool = Field(default_factory=lambda: os.getenv("BROWSER_STEALTH", "false").lower() == "true")
+    browser_persist_session: bool = Field(default_factory=lambda: os.getenv("BROWSER_PERSIST_SESSION", "false").lower() == "true")
     browser_viewport_width: int = Field(default_factory=lambda: int(os.getenv("BROWSER_VIEWPORT_WIDTH", "1280")))
     browser_viewport_height: int = Field(default_factory=lambda: int(os.getenv("BROWSER_VIEWPORT_HEIGHT", "800")))
     user_data_dir: Path = Field(default_factory=lambda: ROOT_DIR / "data" / "browser_profiles")
@@ -34,8 +35,10 @@ class SystemSettings(BaseModel):
     desktop_action_pause: float = Field(default_factory=lambda: float(os.getenv("DESKTOP_ACTION_PAUSE", "0.2")))
 
     # Server & Mission Control
-    server_host: str = Field(default_factory=lambda: os.getenv("SERVER_HOST", "0.0.0.0"))
+    server_host: str = Field(default_factory=lambda: os.getenv("SERVER_HOST", "127.0.0.1"))
     server_port: int = Field(default_factory=lambda: int(os.getenv("SERVER_PORT", "8000")))
+    allow_shell_execution: bool = Field(default_factory=lambda: os.getenv("ALLOW_SHELL_EXECUTION", "false").lower() == "true")
+    allow_destructive_actions: bool = Field(default_factory=lambda: os.getenv("ALLOW_DESTRUCTIVE_ACTIONS", "false").lower() == "true")
     workspace_dir: Path = Field(default_factory=lambda: Path(os.getenv("WORKSPACE_DIR", str(ROOT_DIR / "workspace"))))
     artifacts_dir: Path = Field(default_factory=lambda: ROOT_DIR / "data" / "artifacts")
     session_logs_dir: Path = Field(default_factory=lambda: ROOT_DIR / "data" / "logs")

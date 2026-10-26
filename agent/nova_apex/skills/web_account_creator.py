@@ -1,74 +1,69 @@
-import asyncio
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
+
 from nova_apex.core.schemas import ActionRequest, ActionDomain, ActionType
 from nova_apex.controllers.browser_controller import browser_controller
-from nova_apex.controllers.mobile_controller import mobile_controller
-from nova_apex.core.memory import agent_memory
 from nova_apex.core.logger import agent_logger
 
+
 class WebAccountCreatorSkill:
-    """
-    Autonomous high-level skill:
-    Navigates to arbitrary service signup portals, detects registration form inputs,
-    generates secure realistic identities, populates and submits forms,
-    intercepts 2FA verification codes if requested, and archives credentials to vault.
+    """Help prepare a signup form for an account the user owns.
+
+    The skill never invents an email identity, accepts terms, submits a form,
+    bypasses CAPTCHAs, extracts verification codes, or stores passwords. The user
+    remains responsible for reviewing the site and completing confirmation.
     """
 
-    async def create_account(self, target_url: str, custom_username: Optional[str] = None) -> Dict[str, Any]:
-        agent_logger.info(f"Initiating Autonomous Account Generation procedure for: {target_url}", domain="SKILL")
+    async def create_account(
+        self,
+        target_url: str,
+        custom_username: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        parsed = urlsplit((target_url or "").strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return {"success": False, "error": "Enter a valid http:// or https:// signup URL."}
+        if not email or not email.strip():
+            return {
+                "success": False,
+                "needs_input": True,
+                "required": ["email"],
+                "message": "Provide an email address you control before preparing the signup form.",
+            }
 
-        # 1. Navigate to target portal
-        nav_req = ActionRequest(
+        agent_logger.info("Preparing a user-requested signup form; submission and verification remain manual.", domain="SKILL")
+        navigation = await browser_controller.execute_action(ActionRequest(
             domain=ActionDomain.BROWSER,
             action_type=ActionType.NAVIGATE,
-            description=f"Navigate to {target_url}",
-            target=target_url
-        )
-        nav_res = await browser_controller.execute_action(nav_req)
-        if not nav_res.success:
-            return {"success": False, "error": f"Failed to open {target_url}: {nav_res.error}"}
+            description="Open the user-selected signup page",
+            target=target_url.strip(),
+        ))
+        if not navigation.success:
+            return {"success": False, "error": navigation.error}
 
-        # 2. Execute intelligent form filling & synthesis
-        fill_req = ActionRequest(
+        fill = await browser_controller.execute_action(ActionRequest(
             domain=ActionDomain.BROWSER,
             action_type=ActionType.CREATE_ACCOUNT,
-            description="Auto-fill registration form and credentials",
-            value=custom_username or "auto"
-        )
-        fill_res = await browser_controller.execute_action(fill_req)
-        if not fill_res.success:
-            return {"success": False, "error": fill_res.error}
+            description="Fill only the user-provided signup details",
+            params={
+                "email": email.strip(),
+                "username": (custom_username or "").strip(),
+                "password": password or "",
+            },
+        ))
+        if not fill.success:
+            return {"success": False, "error": fill.error, "screenshot": fill.screenshot_path}
 
-        # 3. Post-submission check for OTP / Verification Code field
-        page = browser_controller.page
-        if page:
-            await asyncio.sleep(2)
-            otp_selectors = [
-                "input[name*='code' i]", "input[id*='code' i]", "input[placeholder*='code' i]",
-                "input[name*='otp' i]", "input[id*='otp' i]", "input[aria-label*='verification' i]"
-            ]
-            for sel in otp_selectors:
-                if await page.is_visible(sel):
-                    agent_logger.warning("Detected 2FA / Verification Code input on page. Scanning for OTP...", domain="SKILL")
-                    # Try reading mobile notification OTP
-                    devices = mobile_controller.get_connected_devices()
-                    if devices:
-                        otp_code = mobile_controller.extract_latest_otp(devices[0])
-                        if otp_code:
-                            await browser_controller.human_type(sel, otp_code)
-                            agent_logger.success(f"Injected intercepted 2FA code [{otp_code}] into verification form!", domain="SKILL")
-                            # Look for verify/confirm button
-                            verify_btn = await page.query_selector("button:has-text('Verify'), button:has-text('Confirm')")
-                            if verify_btn:
-                                await verify_btn.click()
-                    break
-
-        shot = await browser_controller.take_screenshot("account_final")
+        agent_logger.success("Signup fields prepared for user review; no submit or verification action was performed.", domain="SKILL")
         return {
             "success": True,
-            "details": fill_res.data,
-            "screenshot": shot,
-            "error": None
+            "status": "requires_user_review",
+            "submitted": False,
+            "details": fill.data,
+            "screenshot": fill.screenshot_path,
+            "message": "Review the page, terms, and destination yourself, then submit manually if appropriate.",
         }
+
 
 web_account_creator = WebAccountCreatorSkill()

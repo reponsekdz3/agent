@@ -2,6 +2,7 @@ import os
 import shutil
 import platform
 from pathlib import Path
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from nova_apex.config.settings import settings
 from nova_apex.core.logger import agent_logger
@@ -28,13 +29,18 @@ class SystemAdminSkill:
         return info
 
     def clean_temporary_artifacts(self, older_than_days: int = 7) -> int:
+        """Delete PNG artifacts older than the requested retention window."""
+        if older_than_days < 1:
+            raise ValueError("older_than_days must be at least 1.")
         deleted = 0
+        cutoff = datetime.now().timestamp() - timedelta(days=older_than_days).total_seconds()
         for item in settings.artifacts_dir.glob("*.png"):
             try:
-                item.unlink()
-                deleted += 1
-            except Exception:
-                pass
+                if item.is_file() and item.stat().st_mtime < cutoff:
+                    item.unlink()
+                    deleted += 1
+            except OSError as exc:
+                agent_logger.warning(f"Could not remove expired artifact {item.name}: {exc}", domain="SKILL")
         agent_logger.success(f"Cleaned {deleted} temporary artifact files.", domain="SKILL")
         return deleted
 
