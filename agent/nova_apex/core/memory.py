@@ -75,6 +75,29 @@ class AgentMemory:
     def get_working(self, key: str, default: Any = None) -> Any:
         return self.working_memory.get(key, default)
 
+    @classmethod
+    def _sanitize_metadata(cls, value: Any, depth: int = 0) -> Any:
+        """Redact obvious secrets from arbitrary metadata before persistence."""
+        if depth > 8:
+            return "[depth-limit]"
+        sensitive_markers = ("secret", "password", "passwd", "token", "cookie", "authorization", "api_key", "apikey", "otp", "verification_code")
+        if isinstance(value, dict):
+            safe = {}
+            for key, item in list(value.items())[:100]:
+                name = str(key)
+                if any(marker in name.lower().replace("-", "_") for marker in sensitive_markers):
+                    safe[name] = "[redacted]"
+                else:
+                    safe[name] = cls._sanitize_metadata(item, depth + 1)
+            return safe
+        if isinstance(value, list):
+            return [cls._sanitize_metadata(item, depth + 1) for item in value[:100]]
+        if isinstance(value, str):
+            return value[:4096]
+        if value is None or isinstance(value, (int, float, bool)):
+            return value
+        return str(value)[:512]
+
     def store_credential(self, service: str, username: str, secret: str, extra: Optional[Dict[str, Any]] = None):
         service = (service or "").strip()
         username = (username or "").strip()
@@ -90,7 +113,7 @@ class AgentMemory:
         entry = {
             "service": service,
             "username": username,
-            "extra": extra or {},
+            "extra": self._sanitize_metadata(extra or {}),
             "timestamp": timestamp,
             "secret_storage": "os_keyring" if stored_in_keyring else "process_memory",
         }
@@ -191,6 +214,15 @@ class AgentMemory:
             if not isinstance(loaded, dict):
                 raise ValueError("Vault root must be an object.")
             self.vault.update(loaded)
+            # Keep legacy account records to a non-sensitive metadata allowlist.
+            self.vault["created_accounts"] = [
+                {key: account.get(key, "") for key in ("service", "username", "timestamp")}
+                for account in self.vault.get("created_accounts", [])
+                if isinstance(account, dict)
+            ]
+            for credential in self.vault.get("credentials", []):
+                if isinstance(credential, dict):
+                    credential["extra"] = self._sanitize_metadata(credential.get("extra", {}))
             migrated = False
             # Migrate legacy plaintext secrets out of the tracked JSON vault.
             for entry in self.vault.get("credentials", []):

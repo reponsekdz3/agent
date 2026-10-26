@@ -79,12 +79,19 @@ async def run_interactive_cli():
 
         elif choice == "2":
             url = Prompt.ask("\nEnter signup portal URL", default="https://github.com/signup")
-            with console.status(f"[bold cyan]Creating account on {url}...[/bold cyan]"):
-                res = await web_account_creator.create_account(url)
+            email = Prompt.ask("Enter an email address you control")
+            username = Prompt.ask("Optional username (leave blank to skip)", default="")
+            with console.status(f"[bold cyan]Preparing signup details for review at {url}...[/bold cyan]"):
+                res = await web_account_creator.create_account(url, custom_username=username or None, email=email)
             if res.get("success"):
-                console.print(Panel(f"[bold green]Account Created Successfully![/bold green]\nDetails: {res.get('details')}", border_style="green"))
+                console.print(Panel(
+                    f"[bold green]Signup form prepared for review[/bold green]\n"
+                    f"Submitted: No\nDetails: {res.get('details')}\n"
+                    "Review the website, enter any remaining fields, and submit manually.",
+                    border_style="green",
+                ))
             else:
-                console.print(Panel(f"[bold red]Failed to create account:[/bold red] {res.get('error')}", border_style="red"))
+                console.print(Panel(f"[bold red]Signup preparation stopped:[/bold red] {res.get('error') or res.get('message')}", border_style="red"))
 
         elif choice == "3":
             proj_name = Prompt.ask("\nEnter project folder name", default="apex_app")

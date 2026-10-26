@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import ipaddress
+from urllib.parse import urlsplit
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -46,7 +47,7 @@ app.add_middleware(
 @app.middleware("http")
 async def local_mission_control_guard(request: Request, call_next):
     """Keep this computer-control API local and reject untrusted browser origins."""
-    host_header = request.headers.get("host", "").split(":", 1)[0].strip("[]").lower()
+    host_header = (urlsplit("//" + request.headers.get("host", "")).hostname or "").lower()
     if host_header and host_header not in {"localhost", "127.0.0.1", "::1", "testserver"}:
         return JSONResponse(status_code=403, content={"detail": "Mission Control only accepts local Host headers."})
 
@@ -110,7 +111,7 @@ async def get_vault():
     return {
         "credentials": agent_memory.credential_metadata(),
         "created_accounts": agent_memory.vault.get("created_accounts", []),
-        "saved_entities": agent_memory.vault.get("saved_entities", {}),
+        "saved_entities": {key: {"updated_at": value.get("updated_at", "")} for key, value in agent_memory.vault.get("saved_entities", {}).items() if isinstance(value, dict)},
     }
 
 @app.get("/api/telemetry")
@@ -128,18 +129,18 @@ async def get_mobile_devices():
     return {"devices": mobile_controller.get_connected_devices()}
 
 class DirectClickRequest(BaseModel):
-    x: int
-    y: int
-    domain: str = "desktop"
+    x: int = Field(ge=0, le=10000)
+    y: int = Field(ge=0, le=10000)
+    domain: str = Field(default="desktop", pattern="^(desktop|browser)$")
 
 class BrowserNavigateRequest(BaseModel):
-    url: str
+    url: str = Field(min_length=1, max_length=4096)
     headless: Optional[bool] = None
 
 class BrowserActionRequest(BaseModel):
-    action: str
-    target: Optional[str] = None
-    value: Optional[str] = None
+    action: str = Field(min_length=1, max_length=64)
+    target: Optional[str] = Field(default=None, max_length=4096)
+    value: Optional[str] = Field(default=None, max_length=100000)
 
 @app.post("/api/browser/navigate")
 async def browser_navigate(req: BrowserNavigateRequest):
@@ -166,7 +167,10 @@ async def browser_navigate(req: BrowserNavigateRequest):
 @app.post("/api/browser/action")
 async def browser_direct_action(req: BrowserActionRequest):
     from nova_apex.controllers.browser_controller import browser_controller
-    action_type = ActionType(req.action.lower()) if req.action.lower() in [a.value for a in ActionType] else ActionType.CLICK_ELEMENT
+    try:
+        action_type = ActionType(req.action.lower())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported action type: {req.action}")
     res = await browser_controller.execute_action(ActionRequest(
         domain=ActionDomain.BROWSER,
         action_type=action_type,
@@ -216,15 +220,15 @@ async def get_artifact(filename: str):
         file_path = resolve_inside(settings.artifacts_dir, filename)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid artifact path.")
-    if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Artifact not found")
+    if not file_path.is_file() or file_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=404, detail="Image artifact not found")
     return FileResponse(str(file_path))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     client = websocket.client.host if websocket.client else ""
     origin = websocket.headers.get("origin")
-    host_header = websocket.headers.get("host", "").split(":", 1)[0].strip("[]").lower()
+    host_header = (urlsplit("//" + websocket.headers.get("host", "")).hostname or "").lower()
     try:
         local_client = client == "testclient" or ipaddress.ip_address(client).is_loopback
     except ValueError:
@@ -289,8 +293,8 @@ async def get_workspace_file(path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 class SaveFileRequest(BaseModel):
-    path: str
-    content: str
+    path: str = Field(min_length=1, max_length=1024)
+    content: str = Field(max_length=2000000)
 
 @app.post("/api/manage/workspace/file")
 async def save_workspace_file(req: SaveFileRequest):
@@ -311,6 +315,8 @@ async def delete_workspace_file(path: str, confirm: bool = False):
         target = resolve_inside(settings.workspace_dir, path)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid workspace path.")
+    if target.resolve() == settings.workspace_dir.resolve():
+        raise HTTPException(status_code=400, detail="The workspace root cannot be deleted.")
     if target.exists():
         if target.is_file():
             target.unlink()
@@ -425,7 +431,7 @@ async def get_browser_tabs():
             tabs.append({
                 "index": i,
                 "title": await p.title(),
-                "url": p.url,
+                "url": urlsplit(p.url)._replace(query="", fragment="").geturl(),
                 "is_active": (p == browser_controller.page)
             })
         except Exception:
@@ -449,10 +455,10 @@ async def get_browser_cookies():
 
 # 5. Vault CRUD Management
 class CredentialItem(BaseModel):
-    service: str
-    username: str
-    secret: str
-    extra: Dict[str, Any] = {}
+    service: str = Field(min_length=1, max_length=256)
+    username: str = Field(min_length=1, max_length=256)
+    secret: str = Field(min_length=1, max_length=4096)
+    extra: Dict[str, Any] = Field(default_factory=dict)
 
 @app.post("/api/manage/vault/credential")
 async def add_vault_credential(cred: CredentialItem):

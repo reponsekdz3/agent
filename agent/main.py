@@ -14,7 +14,9 @@ def main():
     parser.add_argument("--server", action="store_true", help="Launch Mission Control web server and UI")
     parser.add_argument("--port", type=int, default=settings.server_port, help="Port to run web server on")
     parser.add_argument("--goal", type=str, help="Execute a single natural language mission goal and exit")
-    parser.add_argument("--account-url", type=str, help="Execute automated account creation on target URL")
+    parser.add_argument("--account-url", type=str, help="Prepare a signup form for user review; the agent will not submit it")
+    parser.add_argument("--account-email", type=str, help="Email address you control for a user-reviewed signup form")
+    parser.add_argument("--account-username", type=str, help="Optional username to fill into the signup form")
 
     args = parser.parse_args()
 
@@ -34,8 +36,15 @@ def main():
 
     elif args.account_url:
         from nova_apex.skills.web_account_creator import web_account_creator
-        print(f"Creating account on: {args.account_url}")
-        res = asyncio.run(web_account_creator.create_account(args.account_url))
+        email = (args.account_email or input("Email address you control: ")).strip()
+        if not email:
+            print("A user-controlled email address is required; no account form was opened.")
+            raise SystemExit(2)
+        username = (args.account_username or input("Optional username (press Enter to skip): ")).strip()
+        print(f"Preparing signup form for manual review on: {args.account_url}")
+        res = asyncio.run(web_account_creator.create_account(
+            args.account_url, custom_username=username or None, email=email
+        ))
         print(f"Result: {res}")
 
     else:

@@ -1,6 +1,4 @@
 import os
-import random
-import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
@@ -13,13 +11,10 @@ from nova_apex.core.memory import agent_memory
 
 class BrowserController:
     """
-    Next-Gen Ultra-Stealth Autonomous Browser Engine:
-    - Advanced anti-bot & anti-fingerprinting evasion (WebGL, Canvas noise, AudioContext, Webdriver masks)
-    - Human-like Bézier curve mouse trajectories with physiological micro-tremors
-    - Natural variable Gaussian keystroke latency
-    - Direct CDP (Chrome DevTools Protocol) attachment to real running user browsers
-    - Multi-browser support (Chromium, Firefox, WebKit, Edge, Chrome)
-    - Persistent session state & cookie preservation
+    Local-first Playwright browser adapter.
+
+    Uses normal browser APIs, validates navigation schemes, does not spoof browser
+    fingerprints, and does not persist cookies unless explicitly configured.
     """
 
     def __init__(self):
@@ -35,7 +30,7 @@ class BrowserController:
         if self._is_initialized and self.page and not self.page.is_closed():
             return
 
-        agent_logger.info("Initializing Ultra-Stealth Autonomous Browser Subsystem...", domain="BROWSER")
+        agent_logger.info("Initializing Playwright browser subsystem...", domain="BROWSER")
         self.playwright = await async_playwright().start()
 
         # Connect to real running browser if CDP URL specified
@@ -50,7 +45,7 @@ class BrowserController:
                 agent_logger.success("Attached directly to active user browser instance!", domain="BROWSER")
                 return
             except Exception as e:
-                agent_logger.warning(f"CDP connection to {endpoint} failed ({e}). Spawning standalone stealth instance.", domain="BROWSER")
+                agent_logger.warning(f"CDP connection to {endpoint} failed ({e}). Starting a standard Playwright browser.", domain="BROWSER")
 
         # Use ordinary, observable Playwright automation without fingerprint spoofing.
         if browser_type.lower() == "firefox":
@@ -73,14 +68,14 @@ class BrowserController:
 
     async def human_mouse_move(self, target_x: float, target_y: float):
         """
-        Executes human-like mouse movement along a randomized Bézier curve trajectory.
+        Moves the pointer to the requested point using Playwright.
         """
         await self.page.mouse.move(target_x, target_y)
         self._cursor_pos = (target_x, target_y)
 
     async def human_type(self, selector: str, text: str):
         """
-        Types text with realistic Gaussian latency and occasional human cadence pauses.
+        Fills a locator with explicit text provided by the user or plan.
         """
         await self.page.locator(selector).fill(text)
 
@@ -97,22 +92,24 @@ class BrowserController:
                 if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
                     return StepResult(action_id=action.action_id, success=False, error="Navigation only supports valid http:// and https:// URLs.")
                 url = parsed_url.geturl()
-                agent_logger.action(f"Navigating to {url}", domain="BROWSER")
+                safe_url = parsed_url._replace(query="", fragment="").geturl()
+                agent_logger.action(f"Navigating to {safe_url}", domain="BROWSER")
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=action.timeout_seconds * 1000)
                 if settings.browser_persist_session:
                     await self.context.storage_state(path=str(self.state_file))
+                safe_final_url = urlsplit(self.page.url)._replace(query="", fragment="").geturl()
                 shot_path = await self.take_screenshot("nav_success")
                 return StepResult(
                     action_id=action.action_id,
                     success=True,
-                    output=f"Successfully navigated to {self.page.url}",
+                    output=f"Successfully navigated to {safe_final_url}",
                     screenshot_path=shot_path,
-                    data={"url": self.page.url, "title": await self.page.title()}
+                    data={"url": safe_final_url, "title": await self.page.title()}
                 )
 
             elif action_type == "click_element":
                 selector = action.target
-                agent_logger.action(f"Locating & human-clicking element: {selector}", domain="BROWSER")
+                agent_logger.action(f"Clicking browser target: {selector}", domain="BROWSER")
                 
                 if not selector:
                     return StepResult(action_id=action.action_id, success=False, error="A browser selector is required.")
@@ -124,16 +121,15 @@ class BrowserController:
                 else:
                     await self.page.locator(selector).click(timeout=action.timeout_seconds * 1000)
                 shot = await self.take_screenshot("click_result")
-                return StepResult(action_id=action.action_id, success=True, output=f"Human-clicked {selector}", screenshot_path=shot)
+                return StepResult(action_id=action.action_id, success=True, output=f"Clicked {selector}", screenshot_path=shot)
 
             elif action_type == "type_element":
                 selector = action.target
                 raw_text = action.value or ""
                 text_to_type = agent_memory.resolve_placeholders(raw_text)
-                masked_repr = '*' * len(text_to_type) if any(s in selector.lower() for s in ['pass', 'pwd', 'secret']) else text_to_type
-                agent_logger.action(f"Human-typing into {selector}: {masked_repr}", domain="BROWSER")
-                
-                el = await self.page.wait_for_selector(selector, state="visible", timeout=action.timeout_seconds * 1000)
+                if not selector:
+                    return StepResult(action_id=action.action_id, success=False, error="A browser selector is required.")
+                agent_logger.action(f"Filling browser field {selector} with {len(text_to_type)} character(s).", domain="BROWSER")
                 await self.page.locator(selector).fill(text_to_type, timeout=action.timeout_seconds * 1000)
                 shot = await self.take_screenshot("type_result")
                 return StepResult(action_id=action.action_id, success=True, output=f"Typed text into {selector}", screenshot_path=shot)
@@ -243,7 +239,7 @@ class BrowserController:
                         name: el.name || '',
                         id: el.id || '',
                         placeholder: el.placeholder || '',
-                        value: el.value || '',
+                        value: el.value ? '[present]' : '',
                         x: Math.round(rect.x + rect.width / 2),
                         y: Math.round(rect.y + rect.height / 2)
                     };

@@ -13,7 +13,7 @@ let isHeaded = false;
 // Presets dictionary
 const PRESETS = {
   navigate_github: "Launch browser and navigate to https://github.com, inspect the page DOM, and capture high-res verification screenshot.",
-  create_account: "Navigate to GitHub signup portal at https://github.com/signup, inspect registration fields, generate secure credentials, fill out the account form, and store credentials to vault.",
+  create_account: "Open a signup page selected by the user, fill only details the user provides, and stop for manual review. Never auto-submit a form or process verification codes.",
   scaffold_fullstack: "Scaffold a complete modern project in workspace with frontend, backend, dockerfile, documentation, and configuration files.",
   desktop_audit: "Inspect desktop screen, list all active workspace directories, verify system integrity, and capture a verification snapshot.",
   web_research: "Browse the web, research current breakthrough developments in autonomous multimodal AI agents, and generate a summary report.",
@@ -704,20 +704,9 @@ async function sendMobileKey(keycode) {
 
 async function scanMobileOTP() {
   const box = document.getElementById("otp-interceptor-box");
-  box.innerHTML = `<p>Scanning notification stream for 2FA / OTP codes...</p>`;
-  try {
-    const res = await apiFetch("/api/manage/mobile/otp");
-    const data = await res.json();
-    if (data.connected && data.otp) {
-      box.textContent = "Automatic OTP extraction is disabled. Enter verification codes directly in the intended service.";
-      showToast("Automatic OTP extraction is disabled.");
-    } else {
-      box.textContent = "For security, NOVA-APEX does not read, display, or relay verification codes. Enter any code directly into the service you are signing in to.";
-      showToast("Automatic OTP extraction is disabled.");
-    }
-  } catch (e) {
-    box.innerHTML = `<p>Error scanning for OTP: ${e}</p>`;
-  }
+  if (!box) return;
+  box.textContent = "For security, NOVA-APEX does not read, display, or relay verification codes. Enter the code directly into the intended service.";
+  showToast("Automatic OTP extraction is disabled.");
 }
 
 // 4. Credential Vault Management

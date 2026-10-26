@@ -1,4 +1,5 @@
 import asyncio
+import math
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from nova_apex.core.schemas import (
@@ -153,6 +154,18 @@ class AutonomousEngine:
     async def _dispatch_action(self, action: ActionRequest) -> StepResult:
         domain = action.domain
         try:
+            if action.action_type == ActionType.FAIL:
+                return StepResult(action_id=action.action_id, success=False, error=action.description or "The planner rejected this action.")
+            if action.action_type == ActionType.COMPLETE:
+                return StepResult(action_id=action.action_id, success=False, error="Planner completion markers are not executable actions; refusing to report unverified success.")
+            if action.action_type == ActionType.ASK_HUMAN:
+                return StepResult(action_id=action.action_id, success=False, error="This action requires explicit user interaction. It was not performed automatically.")
+            if action.action_type == ActionType.WAIT:
+                seconds = float(action.params.get("seconds", action.value or 1))
+                if not math.isfinite(seconds) or seconds < 0 or seconds > 60:
+                    return StepResult(action_id=action.action_id, success=False, error="Wait duration must be between 0 and 60 seconds.")
+                await asyncio.sleep(seconds)
+                return StepResult(action_id=action.action_id, success=True, output=f"Waited {seconds:g} second(s).")
             if domain == ActionDomain.BROWSER:
                 from nova_apex.controllers.browser_controller import browser_controller
                 return await browser_controller.execute_action(action)
@@ -171,10 +184,10 @@ class AutonomousEngine:
                 return await shell_controller.execute_action(action)
 
             elif domain == ActionDomain.MEMORY:
-                return StepResult(action_id=action.action_id, success=True, output="Memory operation completed")
+                return StepResult(action_id=action.action_id, success=False, error="No executable memory action is registered for this request.")
 
             else:
-                return StepResult(action_id=action.action_id, success=True, output=f"Executed default action in {domain}")
+                return StepResult(action_id=action.action_id, success=False, error=f"No action dispatcher is registered for domain {domain.value}.")
 
         except Exception as e:
             agent_logger.error(f"Dispatch exception in {domain}: {e}", domain="ENGINE")
