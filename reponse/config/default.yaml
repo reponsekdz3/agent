@@ -1,0 +1,68 @@
+server:
+  host: 127.0.0.1
+  port: 8787
+
+capture:
+  backend: auto
+  device_index: 0
+  rtsp_url: ""
+  width: 1280
+  height: 720
+  fps: 30
+  buffer_size: 2
+  auto_open_all_usb: true
+  include_pc_camera: true
+  max_usb_index: 12
+  wifi_scan_on_start: false
+
+bluetooth:
+  enabled: true
+  service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+  advertise_name: "NexusCam-Link"
+
+phone:
+  discovery_ports: [8080, 4747, 8081, 8554]
+  preferred_path: /video
+
+enhance:
+  enabled: true
+  clahe_clip: 2.4
+  clahe_grid: 8
+  unsharp_amount: 0.55
+  unsharp_radius: 1.2
+  temporal_alpha: 0.35
+  denoise_h: 0.0
+  auto_white_balance: true
+  gamma: 1.05
+
+vision:
+  detect_people: true
+  detect_vehicles: true
+  detect_animals: true
+  detect_objects: true
+  min_track_hits: 1
+  max_track_age: 22
+  iou_match: 0.28
+  speed_smooth: 0.45
+  dnn_model: ""
+  dnn_config: ""
+  dnn_labels: []
+  allow_online_enrichment: false
+
+calibration:
+  # 3x3 camera matrix (pixels). Identity means "uncalibrated — report relative units".
+  fx: 1200.0
+  fy: 1200.0
+  cx: 640.0
+  cy: 360.0
+  # Ground-plane homography image->meters (identity until operator calibrates).
+  homography:
+    - [0.0042, 0.0, -2.1]
+    - [0.0, 0.0038, -0.4]
+    - [0.0, 0.0008, 1.0]
+  assumed_body_density_kg_m3: 985.0
+  reference_face_height_m: 0.185
+
+control:
+  allow_usb_props: true
+  onvif_cgi_base: ""

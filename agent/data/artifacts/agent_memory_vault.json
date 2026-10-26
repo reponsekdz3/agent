@@ -1,0 +1,23 @@
+{
+  "credentials": [
+    {
+      "service": "github.com",
+      "username": "nova_tester",
+      "secret": "ApexSecret#2026_99",
+      "extra": {
+        "role": "automation"
+      },
+      "timestamp": "2026-10-26T08:15:48.990307"
+    }
+  ],
+  "created_accounts": [
+    {
+      "service": "github.com",
+      "username": "nova_tester",
+      "timestamp": "2026-10-26T08:15:48.990307"
+    }
+  ],
+  "saved_entities": {},
+  "learned_patterns": {},
+  "execution_notes": []
+}

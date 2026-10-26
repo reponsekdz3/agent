@@ -1,0 +1,14 @@
+{
+  "name": "andybrunel-backend",
+  "version": "1.0.0",
+  "description": "CRUD backend for customer, promotion, promotion_vehicle, users, vehicle",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "uuid": "^10.0.0"
+  }
+}

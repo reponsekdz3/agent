@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NexusCam Control</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <div class="brand">NEXUSCAM</div>
+      <div class="tag">USB · PC webcam · Wi-Fi · Bluetooth · live analytics</div>
+    </div>
+    <div class="sub" id="src">connecting…</div>
+  </header>
+  <main>
+    <section class="stage">
+      <img id="live" alt="live analytics view" src="/api/v1/stream.mjpg" />
+    </section>
+    <aside>
+      <h2>Local cameras</h2>
+      <div class="row">
+        <button id="usb-scan">Scan USB / PC</button>
+        <button id="usb-all">Open all USB</button>
+        <button id="open-pc">PC webcam</button>
+        <button data-src="demo">Demo range</button>
+      </div>
+      <div id="usb-list" class="list"></div>
+
+      <h2>Wi-Fi / phone</h2>
+      <div class="row">
+        <button id="wifi-scan">Scan LAN</button>
+        <button data-src="phone">Phone auto</button>
+        <a class="btnlink" href="/phone" target="_blank" rel="noopener">Phone companion</a>
+      </div>
+      <div id="wifi-list" class="list"></div>
+      <label>RTSP / HTTP URL
+        <input id="url" placeholder="rtsp://… or http://192.168.x.x:8080/video" />
+      </label>
+      <button id="open-url">Open network camera</button>
+
+      <h2>Bluetooth</h2>
+      <div class="row">
+        <button id="bt-scan">Refresh BLE</button>
+        <button id="bt-attach">Attach advertised stream</button>
+      </div>
+      <pre id="ble">scanning…</pre>
+
+      <h2>Live sources</h2>
+      <div class="row">
+        <button id="view-active">Single</button>
+        <button id="view-mosaic">Mosaic</button>
+      </div>
+      <div id="src-list" class="list"></div>
+      <div id="counts" class="counts"></div>
+
+      <h2>USB / PTZ</h2>
+      <div class="sliders">
+        <label>Exposure <input type="range" min="-13" max="0" step="1" data-ctrl="exposure" /></label>
+        <label>Gain <input type="range" min="0" max="255" step="1" data-ctrl="gain" /></label>
+        <label>Zoom <input type="range" min="0" max="400" step="1" data-ctrl="zoom" /></label>
+        <label>Focus <input type="range" min="0" max="255" step="1" data-ctrl="focus" /></label>
+        <label>Brightness <input type="range" min="0" max="255" step="1" data-ctrl="brightness" /></label>
+      </div>
+      <div class="row">
+        <button data-ptz="pan" data-val="-1">Pan −</button>
+        <button data-ptz="pan" data-val="1">Pan +</button>
+        <button data-ptz="tilt" data-val="1">Tilt +</button>
+        <button data-ptz="tilt" data-val="-1">Tilt −</button>
+      </div>
+
+      <h2>This browser camera</h2>
+      <div class="row">
+        <button id="browser-cam">Push PC/browser camera</button>
+      </div>
+
+      <h2>Per-object analytics</h2>
+      <div id="table"></div>
+    </aside>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

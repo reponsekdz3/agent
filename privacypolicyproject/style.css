@@ -1,0 +1,17 @@
+body{
+    background-color: rgb(20, 15, 15);
+    color:beige
+}
+.container{
+    margin-left: 150px;
+}
+.header{
+    display: flex;
+}
+.pagebody{
+    background-color: rgb(54, 51, 51);
+    width: 1100px;
+    padding: 20px;
+    border-radius: 15px;
+    
+}

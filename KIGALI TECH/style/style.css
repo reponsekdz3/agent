@@ -1,0 +1,45 @@
+body{
+    font-family: Arial, sans-serif;
+    background:  green;
+    color:  black;
+    margin:20px;
+    line-height:1.6;
+}
+
+header{
+    nav{
+        background-color: #1f3a5f;
+        padding: 12px 20px;
+        margin-bottom: 25px;
+        border-radius: 6px;
+    }
+    a{
+    color:yellow ;
+    margin-right: 20px;
+    margin-bottom: 25px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+}
+}
+
+
+h1{
+    color: aqua;
+    text-align: center;
+}
+h2{
+    color: blueviolet;
+    text-align: center;
+}
+h3{
+    color:blueviolet;
+}
+hr{
+    border: 0;
+    border-top: 2px solid #1f3a5f;
+    margin: 20px 0;
+}
+
+
+

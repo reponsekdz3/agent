@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOVA-APEX // Autonomous Automation OS</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Orbitron:wght@500;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="ambient-glow"></div>
+
+  <!-- Header -->
+  <header class="top-nav">
+    <div class="nav-brand">
+      <div class="logo-orb pulse-glow"></div>
+      <div class="brand-text">
+        <h1>NOVA<span>APEX</span></h1>
+        <span class="sub-badge">UNIVERSAL COMPUTER-USE & AUTONOMOUS AGENT OS</span>
+      </div>
+    </div>
+
+    <div class="nav-status">
+      <div class="status-pill" id="agent-status-pill">
+        <span class="status-dot"></span>
+        <span id="agent-status-text">SYSTEM READY</span>
+      </div>
+      <div class="telemetry-pill" id="telemetry-pill">
+        <span class="icon">⚡</span>
+        <span id="disk-info">Free: -- GB</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="dashboard-grid">
+    <!-- Left Column: Command & Plan -->
+    <section class="panel command-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">🎯</span>
+          <h2>MISSION OBJECTIVE</h2>
+        </div>
+        <div class="preset-dropdown">
+          <select id="preset-selector" onchange="applyPreset(this.value)">
+            <option value="">⚡ Load Quick Action Preset...</option>
+            <option value="create_account">Create automated web account on GitHub</option>
+            <option value="scaffold_fullstack">Scaffold a full-stack project & files in workspace</option>
+            <option value="desktop_audit">Take desktop screenshot and audit system files</option>
+            <option value="web_research">Deep web research: Next-gen AI agent architectures</option>
+            <option value="mobile_inspect">Scan & connect to Android mobile device (ADB)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="goal-input-container">
+        <textarea id="goal-prompt" placeholder="Instruct NOVA-APEX in natural language... (e.g., 'Go to internet, create an account, build folders and files in workspace, capture desktop and report progress')"></textarea>
+        <div class="action-buttons">
+          <button id="btn-run" class="btn btn-primary" onclick="submitGoal()">
+            <span class="btn-icon">▶</span> EXECUTE MISSION
+          </button>
+          <button id="btn-pause" class="btn btn-secondary" onclick="togglePause()">
+            <span class="btn-icon">⏸</span> PAUSE
+          </button>
+          <button id="btn-abort" class="btn btn-danger" onclick="abortGoal()">
+            <span class="btn-icon">⏹</span> ABORT
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Execution Plan Graph -->
+      <div class="plan-container">
+        <div class="section-title">
+          <h3>EXECUTION GRAPH & MILESTONES</h3>
+          <span class="step-counter" id="step-counter">0 / 0 Steps</span>
+        </div>
+        <div class="steps-list" id="steps-list">
+          <div class="empty-state">No active mission. Enter an objective above or load a preset.</div>
+        </div>
+      </div>
+
+      <!-- Account Vault & Created Credentials -->
+      <div class="vault-container">
+        <div class="section-title">
+          <h3>CREDENTIAL VAULT & CREATED ACCOUNTS</h3>
+          <button class="btn-sm" onclick="loadVault()">↻ Refresh</button>
+        </div>
+        <div class="vault-list" id="vault-list">
+          <div class="vault-empty">Vault synchronized. Ready to archive credentials.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Visual Viewport & Real-time Console -->
+    <section class="panel viewport-panel">
+      <!-- Live Screen / Viewport Preview -->
+      <div class="viewport-box">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="panel-icon">👁</span>
+            <h2>MULTIMODAL PERCEPTION VIEWPORT</h2>
+          </div>
+          <div class="viewport-tags">
+            <span class="badge" id="viewport-domain-badge">IDLE</span>
+          </div>
+        </div>
+
+        <div class="screen-canvas" id="screen-canvas">
+          <div class="screen-placeholder" id="screen-placeholder">
+            <div class="radar-scan"></div>
+            <p>AWAITING PERCEPTION STREAM</p>
+            <span>Live screenshots from Browser, Desktop, and Mobile will render here</span>
+          </div>
+          <img id="screen-img" class="screen-preview" src="" alt="Viewport Stream" style="display: none;">
+        </div>
+      </div>
+
+      <!-- Live Terminal Log -->
+      <div class="terminal-box">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          <div class="terminal-title">LIVE TELEMETRY STREAM</div>
+          <div class="terminal-actions">
+            <button class="btn-xs" onclick="clearLogs()">Clear</button>
+          </div>
+        </div>
+        <div class="terminal-body" id="terminal-body">
+          <div class="log-entry system">[SYSTEM] NOVA-APEX Universal Automation Engine online.</div>
+          <div class="log-entry info">[INFO] Cross-platform controllers ready: Web (Playwright Stealth), Desktop (PyAutoGUI/OS), Mobile (ADB), Shell (PowerShell).</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
