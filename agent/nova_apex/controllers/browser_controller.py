@@ -177,8 +177,9 @@ class BrowserController:
         params = action.params or {}
         email = str(params.get("email") or "").strip()
         username = str(params.get("username") or "").strip()
-        password = str(params.get("password") or "")
-        if not any((email, username, password)):
+        # Passwords are intentionally left for manual entry. Filling a password
+        # into an arbitrary user-selected origin risks credential disclosure.
+        if not any((email, username)):
             return StepResult(
                 action_id=action.action_id,
                 success=False,
@@ -191,9 +192,6 @@ class BrowserController:
             selectors.append(("email", ["input[type='email']", "input[name*='email' i]", "input[id*='email' i]", "input[autocomplete='email']"], email))
         if username:
             selectors.append(("username", ["input[name*='user' i]", "input[id*='user' i]", "input[name*='login' i]", "input[placeholder*='username' i]", "input[name='name']"], username))
-        if password:
-            selectors.append(("password", ["input[type='password']"], password))
-
         for label, candidates, value in selectors:
             filled = False
             for selector in candidates:
@@ -210,12 +208,20 @@ class BrowserController:
                 agent_logger.warning(f"No visible {label} field found; leaving it for manual entry.", domain="BROWSER")
 
         screenshot = await self.take_screenshot("signup_review")
+        if not fields_filled:
+            return StepResult(
+                action_id=action.action_id,
+                success=False,
+                error="No supported visible signup fields were found. Review the page and enter details manually.",
+                screenshot_path=screenshot,
+                data={"url": urlsplit(self.page.url)._replace(query="", fragment="").geturl(), "fields_filled": [], "manual_fields_required": ["password", "terms review", "submission", "verification"], "requires_user_review": True, "submitted": False},
+            )
         return StepResult(
             action_id=action.action_id,
             success=True,
-            output="Provided signup fields prepared. No terms were accepted, no form was submitted, and no credentials were saved.",
+            output="Provided non-secret signup fields prepared. Enter passwords and review terms yourself; no form was submitted and no credentials were saved.",
             screenshot_path=screenshot,
-            data={"url": self.page.url, "fields_filled": fields_filled, "requires_user_review": True, "submitted": False},
+            data={"url": urlsplit(self.page.url)._replace(query="", fragment="").geturl(), "fields_filled": fields_filled, "manual_fields_required": ["password", "terms review", "submission", "verification"], "requires_user_review": True, "submitted": False},
         )
 
     async def extract_interactive_elements(self) -> Dict[str, Any]:

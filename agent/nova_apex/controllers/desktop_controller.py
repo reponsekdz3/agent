@@ -138,7 +138,7 @@ class DesktopController:
 
             elif action_type == "desktop_type":
                 text = agent_memory.resolve_placeholders(action.value or action.target or "")
-                agent_logger.action(f"Desktop typing text: '{text[:25]}...'", domain="DESKTOP")
+                agent_logger.action(f"Typing {len(text)} character(s) into the active desktop field.", domain="DESKTOP")
                 pyautogui.write(text, interval=0.04)
                 shot = self.take_screenshot("typed")
                 return StepResult(action_id=action.action_id, success=True, output="Typed text into active window", screenshot_path=shot)
@@ -179,7 +179,7 @@ class DesktopController:
             elif action_type == "raw_keystroke":
                 from nova_apex.controllers.win32_native import win32_subsystem
                 raw_text = agent_memory.resolve_placeholders(action.value or action.target or "")
-                agent_logger.action(f"Dispatching low-level Win32 SendInput keystrokes: '{raw_text[:20]}...'", domain="DESKTOP")
+                agent_logger.action(f"Dispatching {len(raw_text)} low-level keystroke character(s).", domain="DESKTOP")
                 count = 0
                 for ch in raw_text:
                     if win32_subsystem.send_hardware_unicode_char(ch):

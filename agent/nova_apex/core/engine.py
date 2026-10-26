@@ -65,7 +65,7 @@ class AutonomousEngine:
             self._is_paused = False
 
             self.active_goal = AgentGoal(prompt=prompt, status=GoalStatus.PLANNING, steps=[])
-            agent_logger.info(f"Initializing autonomous mission: '{prompt[:120]}'", domain="ENGINE", goal_id=self.active_goal.goal_id)
+            agent_logger.info("Initializing autonomous mission.", domain="ENGINE", goal_id=self.active_goal.goal_id)
 
             # A planner exception must not leave the dashboard stuck in PLANNING.
             try:

@@ -49,7 +49,6 @@ class WebAccountCreatorSkill:
             params={
                 "email": email.strip(),
                 "username": (custom_username or "").strip(),
-                "password": password or "",
             },
         ))
         if not fill.success:

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from nova_apex.config.settings import settings
@@ -41,15 +42,16 @@ def test_credential_vault_never_persists_plaintext_secrets(tmp_path: Path):
     vault_path = tmp_path / "vault.json"
     memory = AgentMemory(vault_path)
     secret = "test-secret-that-must-not-reach-disk"
-    memory.store_credential("example.test", "alice", secret, {"scope": "unit-test", "password": secret})
+    service = f"test-{uuid4().hex}.example.test"
+    memory.store_credential(service, "alice", secret, {"scope": "unit-test", "password": secret})
     serialized = vault_path.read_text(encoding="utf-8")
     assert secret not in serialized
     assert "secret" not in memory.vault["credentials"][0]
     assert memory.vault["credentials"][0]["extra"]["password"] == "[redacted]"
     assert memory.credential_metadata()[0]["secret"] == "••••••••"
-    assert memory.get_credentials_for("example.test")["secret"] == secret
-    assert memory.delete_credential("example.test", "alice") is True
-    assert memory.get_credentials_for("example.test") is None
+    assert memory.get_credentials_for(service)["secret"] == secret
+    assert memory.delete_credential(service, "alice") is True
+    assert memory.get_credentials_for(service) is None
 
 
 def test_invalid_workspace_path_returns_bad_request():
@@ -92,7 +94,7 @@ def test_vault_api_never_returns_credential_values():
 
     client = TestClient(app)
     secret = "api-response-test-secret-do-not-return"
-    service = "test-vault-api.local"
+    service = f"test-{uuid4().hex}.vault-api.local"
     username = "automated-safety-check"
     try:
         response = client.post("/api/manage/vault/credential", json={
