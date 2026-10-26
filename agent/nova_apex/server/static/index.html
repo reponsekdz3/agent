@@ -17,48 +17,70 @@
       <div class="logo-orb pulse-glow"></div>
       <div class="brand-text">
         <h1>NOVA<span>APEX</span></h1>
-        <span class="sub-badge">UNIVERSAL COMPUTER-USE & AUTONOMOUS AGENT OS</span>
+        <span class="sub-badge">CROSS-PLATFORM AUTONOMOUS AGENT & OMNI OS HUB</span>
       </div>
     </div>
 
+    <!-- Navigation Hub Tabs -->
+    <nav class="hub-tabs-nav">
+      <button class="hub-tab active" id="tab-btn-terminal" onclick="switchHubTab('terminal')">🎯 Mission Terminal</button>
+      <button class="hub-tab" id="tab-btn-workspace" onclick="switchHubTab('workspace')">🗂️ Workspace Explorer</button>
+      <button class="hub-tab" id="tab-btn-os" onclick="switchHubTab('os')">🖥️ OS & Processes</button>
+      <button class="hub-tab" id="tab-btn-mobile" onclick="switchHubTab('mobile')">📱 Mobile ADB</button>
+      <button class="hub-tab" id="tab-btn-vault" onclick="switchHubTab('vault')">🔐 Credential Vault</button>
+    </nav>
+
     <div class="nav-status">
       <div class="status-pill" id="agent-status-pill">
-        <span class="status-dot"></span>
+        <span class="status-dot" id="status-dot"></span>
         <span id="agent-status-text">SYSTEM READY</span>
       </div>
       <div class="telemetry-pill" id="telemetry-pill">
         <span class="icon">⚡</span>
         <span id="disk-info">Free: -- GB</span>
       </div>
+      <button class="btn-mode-toggle" id="btn-browser-mode" onclick="toggleBrowserVisibility()">
+        🖥️ Mode: Headless
+      </button>
     </div>
   </header>
 
-  <!-- Main Grid -->
-  <main class="dashboard-grid">
+  <!-- ========================================================================= -->
+  <!-- TAB 1: MISSION TERMINAL (Default View) -->
+  <!-- ========================================================================= -->
+  <main class="dashboard-grid tab-content" id="tab-terminal">
     <!-- Left Column: Command & Plan -->
     <section class="panel command-panel">
       <div class="panel-header">
         <div class="panel-title">
           <span class="panel-icon">🎯</span>
-          <h2>MISSION OBJECTIVE</h2>
+          <h2>AUTONOMOUS MISSION CONTROL</h2>
         </div>
         <div class="preset-dropdown">
           <select id="preset-selector" onchange="applyPreset(this.value)">
             <option value="">⚡ Load Quick Action Preset...</option>
+            <option value="navigate_github">Navigate & Inspect GitHub</option>
             <option value="create_account">Create automated web account on GitHub</option>
             <option value="scaffold_fullstack">Scaffold a full-stack project & files in workspace</option>
             <option value="desktop_audit">Take desktop screenshot and audit system files</option>
             <option value="web_research">Deep web research: Next-gen AI agent architectures</option>
-            <option value="mobile_inspect">Scan & connect to Android mobile device (ADB)</option>
+            <option value="hardware_inspect">Enumerate hardware displays, storage & windows</option>
           </select>
         </div>
       </div>
 
       <div class="goal-input-container">
-        <textarea id="goal-prompt" placeholder="Instruct NOVA-APEX in natural language... (e.g., 'Go to internet, create an account, build folders and files in workspace, capture desktop and report progress')"></textarea>
+        <textarea id="goal-prompt" placeholder="Instruct NOVA-APEX in natural language... (e.g., 'Navigate to github.com, inspect the page, fill registration credentials and store to vault')"></textarea>
+        
+        <!-- Live Mission Progress Bar -->
+        <div class="progress-bar-container" id="progress-container" style="display: none;">
+          <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
+          <span class="progress-label" id="progress-label">Executing...</span>
+        </div>
+
         <div class="action-buttons">
           <button id="btn-run" class="btn btn-primary" onclick="submitGoal()">
-            <span class="btn-icon">▶</span> EXECUTE MISSION
+            <span class="btn-icon">▶</span> <span id="run-btn-text">EXECUTE MISSION</span>
           </button>
           <button id="btn-pause" class="btn btn-secondary" onclick="togglePause()">
             <span class="btn-icon">⏸</span> PAUSE
@@ -73,27 +95,31 @@
       <div class="plan-container">
         <div class="section-title">
           <h3>EXECUTION GRAPH & MILESTONES</h3>
-          <span class="step-counter" id="step-counter">0 / 0 Steps</span>
+          <span class="step-counter" id="step-counter">0 / 0 Milestones</span>
         </div>
         <div class="steps-list" id="steps-list">
-          <div class="empty-state">No active mission. Enter an objective above or load a preset.</div>
-        </div>
-      </div>
-
-      <!-- Account Vault & Created Credentials -->
-      <div class="vault-container">
-        <div class="section-title">
-          <h3>CREDENTIAL VAULT & CREATED ACCOUNTS</h3>
-          <button class="btn-sm" onclick="loadVault()">↻ Refresh</button>
-        </div>
-        <div class="vault-list" id="vault-list">
-          <div class="vault-empty">Vault synchronized. Ready to archive credentials.</div>
+          <div class="empty-state">No active mission. Enter an objective above or click a preset.</div>
         </div>
       </div>
     </section>
 
-    <!-- Right Column: Visual Viewport & Real-time Console -->
+    <!-- Right Column: Interactive Browser Bar, Viewport & Real-time Console -->
     <section class="panel viewport-panel">
+      <!-- Direct Interactive Browser Toolbar -->
+      <div class="browser-nav-bar">
+        <div class="nav-controls">
+          <button class="btn-nav" title="Back" onclick="directBrowserAction('navigate', 'back')">◀</button>
+          <button class="btn-nav" title="Reload" onclick="directBrowserAction('navigate', 'reload')">↻</button>
+        </div>
+        <div class="url-input-wrapper">
+          <span class="url-prefix">https://</span>
+          <input type="text" id="browser-url-bar" placeholder="Enter website URL (e.g. github.com, wikipedia.org, google.com)..." onkeydown="if(event.key==='Enter') directNavigate()">
+        </div>
+        <button class="btn-go" onclick="directNavigate()">🚀 GO</button>
+        <button class="btn-tool" title="Take Screenshot" onclick="directBrowserAction('browser_screenshot')">📸 SNAP</button>
+        <button class="btn-tool" title="Auto-Fill Form" onclick="directBrowserAction('create_account')">👤 AUTO-FILL</button>
+      </div>
+
       <!-- Live Screen / Viewport Preview -->
       <div class="viewport-box">
         <div class="panel-header">
@@ -102,6 +128,7 @@
             <h2>MULTIMODAL PERCEPTION VIEWPORT</h2>
           </div>
           <div class="viewport-tags">
+            <span class="viewport-hint">Click image to interact</span>
             <span class="badge" id="viewport-domain-badge">IDLE</span>
           </div>
         </div>
@@ -112,7 +139,7 @@
             <p>AWAITING PERCEPTION STREAM</p>
             <span>Live screenshots from Browser, Desktop, and Mobile will render here</span>
           </div>
-          <img id="screen-img" class="screen-preview" src="" alt="Viewport Stream" style="display: none;">
+          <img id="screen-img" class="screen-preview" src="" alt="Viewport Stream" style="display: none;" title="Click anywhere to dispatch direct interaction">
         </div>
       </div>
 
@@ -124,15 +151,163 @@
             <span class="dot yellow"></span>
             <span class="dot green"></span>
           </div>
-          <div class="terminal-title">LIVE TELEMETRY STREAM</div>
+          <div class="terminal-title">LIVE REAL-TIME TELEMETRY STREAM</div>
           <div class="terminal-actions">
             <button class="btn-xs" onclick="clearLogs()">Clear</button>
           </div>
         </div>
         <div class="terminal-body" id="terminal-body">
           <div class="log-entry system">[SYSTEM] NOVA-APEX Universal Automation Engine online.</div>
-          <div class="log-entry info">[INFO] Cross-platform controllers ready: Web (Playwright Stealth), Desktop (PyAutoGUI/OS), Mobile (ADB), Shell (PowerShell).</div>
+          <div class="log-entry info">[INFO] Multi-domain controllers ready: Stealth Web, Native Win32 Desktop, Mobile ADB, Shell.</div>
         </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 2: WORKSPACE FILE EXPLORER -->
+  <!-- ========================================================================= -->
+  <main class="dashboard-grid tab-content" id="tab-workspace" style="display: none;">
+    <section class="panel" style="grid-column: span 1;">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">📁</span>
+          <h2>WORKSPACE FILE TREE</h2>
+        </div>
+        <button class="btn-sm" onclick="loadWorkspaceTree()">↻ Refresh</button>
+      </div>
+      <div class="file-tree-container" id="file-tree-list">
+        <div class="empty-state">Loading workspace tree...</div>
+      </div>
+    </section>
+
+    <section class="panel" style="grid-column: span 1;">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">📝</span>
+          <h2 id="active-file-title">FILE EDITOR</h2>
+        </div>
+        <div class="editor-actions">
+          <button class="btn-sm" onclick="saveActiveFile()">💾 Save</button>
+          <button class="btn-danger-sm" onclick="deleteActiveFile()">🗑️ Delete</button>
+        </div>
+      </div>
+      <textarea id="file-editor-content" class="code-editor" placeholder="Select a file from the tree to view or edit its contents..."></textarea>
+    </section>
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 3: OS WINDOWS & PROCESS INSPECTOR -->
+  <!-- ========================================================================= -->
+  <main class="dashboard-grid tab-content" id="tab-os" style="display: none;">
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">🪟</span>
+          <h2>VISIBLE WINDOWS (WIN32 HWND)</h2>
+        </div>
+        <button class="btn-sm" onclick="loadWindowsList()">↻ Scan Windows</button>
+      </div>
+      <div class="management-table-container">
+        <table class="data-table">
+          <thead>
+            <tr><th>HWND</th><th>Window Title</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="windows-table-body">
+            <tr><td colspan="3" class="empty-state">Click Scan to detect open windows.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">⚙️</span>
+          <h2>TOP CPU/RAM PROCESSES</h2>
+        </div>
+        <button class="btn-sm" onclick="loadProcessList()">↻ Refresh Processes</button>
+      </div>
+      <div class="management-table-container">
+        <table class="data-table">
+          <thead>
+            <tr><th>PID</th><th>Process Name</th><th>RAM (MB)</th></tr>
+          </thead>
+          <tbody id="process-table-body">
+            <tr><td colspan="3" class="empty-state">Loading processes...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 4: MOBILE ADB DEVICE MANAGER -->
+  <!-- ========================================================================= -->
+  <main class="dashboard-grid tab-content" id="tab-mobile" style="display: none;">
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">📱</span>
+          <h2>DEVICE TELEMETRY & HARDWARE</h2>
+        </div>
+        <button class="btn-sm" onclick="loadMobileDetails()">↻ Query ADB</button>
+      </div>
+      <div class="mobile-info-card" id="mobile-info-card">
+        <div class="empty-state">Scanning for USB or Wi-Fi connected Android devices...</div>
+      </div>
+      
+      <div class="mobile-controls-panel">
+        <div class="section-title"><h3>HARDWARE BUTTON DISPATCH</h3></div>
+        <div class="mobile-btn-grid">
+          <button class="btn-mobile-key" onclick="sendMobileKey(3)">🏠 HOME</button>
+          <button class="btn-mobile-key" onclick="sendMobileKey(4)">◀ BACK</button>
+          <button class="btn-mobile-key" onclick="sendMobileKey(187)">📑 APPS</button>
+          <button class="btn-mobile-key" onclick="sendMobileKey(26)">🔒 POWER</button>
+          <button class="btn-mobile-key" onclick="sendMobileKey(24)">🔊 VOL +</button>
+          <button class="btn-mobile-key" onclick="sendMobileKey(25)">🔉 VOL -</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">🔐</span>
+          <h2>LIVE 2FA / OTP INTERCEPTOR</h2>
+        </div>
+        <button class="btn-sm" onclick="scanMobileOTP()">⚡ Scan Notifications</button>
+      </div>
+      <div class="otp-interceptor-box" id="otp-interceptor-box">
+        <p>Awaiting incoming 2FA SMS or notification codes...</p>
+        <span class="sub-text">Any 4-8 digit verification code sent to the connected phone will automatically display here.</span>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- TAB 5: CREDENTIAL VAULT & ACCOUNTS -->
+  <!-- ========================================================================= -->
+  <main class="dashboard-grid tab-content" id="tab-vault" style="display: none;">
+    <section class="panel" style="grid-column: span 2;">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="panel-icon">🔐</span>
+          <h2>CENTRAL CREDENTIAL VAULT & CREATED IDENTITIES</h2>
+        </div>
+        <div class="vault-actions">
+          <button class="btn-sm" onclick="loadVaultTable()">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="management-table-container">
+        <table class="data-table">
+          <thead>
+            <tr><th>Service / Domain</th><th>Username / Identity</th><th>Secret / Token</th><th>Timestamp</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="vault-table-body">
+            <tr><td colspan="5" class="empty-state">No credentials generated yet.</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </main>

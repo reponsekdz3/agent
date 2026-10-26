@@ -7,10 +7,6 @@ from nova_apex.core.schemas import (
 from nova_apex.core.planner import planner
 from nova_apex.core.logger import agent_logger
 from nova_apex.core.memory import agent_memory
-from nova_apex.controllers.browser_controller import browser_controller
-from nova_apex.controllers.desktop_controller import desktop_controller
-from nova_apex.controllers.mobile_controller import mobile_controller
-from nova_apex.controllers.shell_controller import shell_controller
 
 class AutonomousEngine:
     """
@@ -45,12 +41,19 @@ class AutonomousEngine:
         async with self._lock:
             self._is_aborted = False
             self._is_paused = False
-            agent_logger.info(f"Initializing autonomous mission: '{prompt}'", domain="ENGINE")
+            
+            # Immediately register new active goal so UI updates instantly
+            self.active_goal = AgentGoal(
+                prompt=prompt,
+                status=GoalStatus.PLANNING,
+                steps=[]
+            )
+            agent_logger.info(f"Initializing autonomous mission: '{prompt}'", domain="ENGINE", goal_id=self.active_goal.goal_id)
 
             # Phase 1: Synthesize High-Level Execution Plan
             goal = await planner.create_plan(prompt)
-            self.active_goal = goal
             goal.status = GoalStatus.EXECUTING
+            self.active_goal = goal
 
             # Phase 2: Sequential Milestone Execution with Dynamic Healing
             for i, step in enumerate(goal.steps):
@@ -114,16 +117,20 @@ class AutonomousEngine:
         domain = action.domain
         try:
             if domain == ActionDomain.BROWSER:
+                from nova_apex.controllers.browser_controller import browser_controller
                 return await browser_controller.execute_action(action)
 
             elif domain in [ActionDomain.DESKTOP, ActionDomain.FILESYSTEM]:
+                from nova_apex.controllers.desktop_controller import desktop_controller
                 # Run synchronous desktop/filesystem in thread pool to prevent blocking event loop
                 return await asyncio.to_thread(desktop_controller.execute_action, action)
 
             elif domain == ActionDomain.MOBILE:
+                from nova_apex.controllers.mobile_controller import mobile_controller
                 return await asyncio.to_thread(mobile_controller.execute_action, action)
 
             elif domain == ActionDomain.SHELL:
+                from nova_apex.controllers.shell_controller import shell_controller
                 return await shell_controller.execute_action(action)
 
             elif domain == ActionDomain.MEMORY:

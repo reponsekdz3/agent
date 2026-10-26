@@ -1,0 +1,22 @@
+{"timestamp": "2026-10-26T09:22:16.905534", "level": "INFO", "domain": "DESKTOP", "message": "Desktop GUI controller initialized. Screen size: 2560x1440", "data": {}}
+{"timestamp": "2026-10-26T09:22:31.992534", "level": "INFO", "domain": "BROWSER", "message": "Initializing Ultra-Stealth Autonomous Browser Subsystem...", "data": {}}
+{"timestamp": "2026-10-26T09:22:39.665516", "level": "SUCCESS", "domain": "BROWSER", "message": "Ultra-Stealth browser subsystem online & hardened against bot-detection.", "data": {}}
+{"timestamp": "2026-10-26T09:22:39.676908", "level": "ACTION", "domain": "BROWSER", "message": "Stealth navigating to https://example.com", "data": {}}
+{"timestamp": "2026-10-26T09:22:56.328305", "level": "INFO", "domain": "SKILL", "message": "System Telemetry: OS Windows (AMD64) | Disk Free: 76.11 GB", "data": {}}
+{"timestamp": "2026-10-26T09:22:56.340993", "level": "INFO", "domain": "SKILL", "message": "System Telemetry: OS Windows (AMD64) | Disk Free: 76.11 GB", "data": {}}
+{"timestamp": "2026-10-26T09:23:33.139184", "level": "INFO", "domain": "ENGINE", "message": "Initializing autonomous mission: 'Navigate to wikipedia.org and inspect the page title and elements'", "data": {"goal_id": "9f06e2e0"}}
+{"timestamp": "2026-10-26T09:23:33.142022", "level": "THINKING", "domain": "PLANNER", "message": "Formulating execution graph for: 'Navigate to wikipedia.org and inspect the page title and elements'", "data": {}}
+{"timestamp": "2026-10-26T09:23:33.144345", "level": "THINKING", "domain": "LLM", "message": "Reasoning with engine [heuristic]...", "data": {}}
+{"timestamp": "2026-10-26T09:23:33.146798", "level": "SUCCESS", "domain": "PLANNER", "message": "Synthesized plan with 3 structured milestone(s).", "data": {}}
+{"timestamp": "2026-10-26T09:23:33.149135", "level": "INFO", "domain": "ENGINE", "message": "--- [Step 1/3] Launch Browser & Navigate to https://wikipedia.org ---", "data": {}}
+{"timestamp": "2026-10-26T09:23:33.152465", "level": "ACTION", "domain": "BROWSER", "message": "Stealth navigating to https://wikipedia.org", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.472149", "level": "SUCCESS", "domain": "ENGINE", "message": "Step 1 completed successfully.", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.473837", "level": "INFO", "domain": "ENGINE", "message": "--- [Step 2/3] Inspect Page DOM & Interactive Elements ---", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.476010", "level": "ACTION", "domain": "BROWSER", "message": "Extracting page accessibility snapshot & interactive tree...", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.495113", "level": "SUCCESS", "domain": "ENGINE", "message": "Step 2 completed successfully.", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.498885", "level": "INFO", "domain": "ENGINE", "message": "--- [Step 3/3] Capture Viewport Perception Screenshot ---", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.627166", "level": "SUCCESS", "domain": "ENGINE", "message": "Step 3 completed successfully.", "data": {}}
+{"timestamp": "2026-10-26T09:23:39.628649", "level": "SUCCESS", "domain": "ENGINE", "message": "Mission 'Navigate to wikipedia.org and inspect the page title and ele' completed with 100% success rate!", "data": {}}
+{"timestamp": "2026-10-26T09:23:56.180188", "level": "INFO", "domain": "SKILL", "message": "System Telemetry: OS Windows (AMD64) | Disk Free: 76.11 GB", "data": {}}
+{"timestamp": "2026-10-26T09:23:56.200301", "level": "INFO", "domain": "SKILL", "message": "System Telemetry: OS Windows (AMD64) | Disk Free: 76.11 GB", "data": {}}
+{"timestamp": "2026-10-26T09:24:13.881118", "level": "INFO", "domain": "SKILL", "message": "System Telemetry: OS Windows (AMD64) | Disk Free: 76.1 GB", "data": {}}

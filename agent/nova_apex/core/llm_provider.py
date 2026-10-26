@@ -287,15 +287,25 @@ class LLMProvider:
             })
 
         # General browsing / searching / execution
-        elif any(k in lower for k in ["browse", "search", "web", "internet", "google", "visit"]):
+        elif any(k in lower for k in ["browse", "search", "web", "internet", "google", "visit", "navigate", "open", "url", ".com", ".org", ".net", ".io", ".ai", "site", "page", "http"]):
             url = "https://www.google.com"
-            if "http" in lower:
-                for w in prompt.split():
-                    if w.startswith("http"): url = w; break
+            words = prompt.split()
+            for w in words:
+                cleaned_word = w.strip("',\"()[]{}")
+                if cleaned_word.startswith("http://") or cleaned_word.startswith("https://"):
+                    url = cleaned_word
+                    break
+                elif any(cleaned_word.endswith(ext) for ext in [".com", ".org", ".net", ".io", ".ai", ".co", ".dev", ".edu", ".gov"]):
+                    url = f"https://{cleaned_word}"
+                    break
+                elif cleaned_word.lower() in ["youtube", "github", "twitter", "reddit", "wikipedia", "amazon", "bing"]:
+                    url = f"https://www.{cleaned_word.lower()}.com"
+                    break
+
             steps.append({
                 "step_id": step_id,
-                "title": f"Navigate to Destination Webpage",
-                "description": f"Direct browser to {url}",
+                "title": f"Launch Browser & Navigate to {url}",
+                "description": f"Direct stealth browser to {url}",
                 "domain": "browser",
                 "action_type": "navigate",
                 "target": url,
@@ -305,8 +315,8 @@ class LLMProvider:
             step_id += 1
             steps.append({
                 "step_id": step_id,
-                "title": "Extract Page Content & Interactive Elements",
-                "description": "Scan DOM accessibility tree and read content",
+                "title": "Inspect Page DOM & Interactive Elements",
+                "description": f"Scan interactive buttons, forms, and links on {url}",
                 "domain": "browser",
                 "action_type": "extract_content",
                 "target": "body",
@@ -316,8 +326,8 @@ class LLMProvider:
             step_id += 1
             steps.append({
                 "step_id": step_id,
-                "title": "Capture Verification Viewport Screenshot",
-                "description": "Store high-res snapshot of the active page",
+                "title": "Capture Viewport Perception Screenshot",
+                "description": "Store live high-res visual frame of the webpage",
                 "domain": "browser",
                 "action_type": "browser_screenshot",
                 "target": "viewport",

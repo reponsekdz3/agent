@@ -1,0 +1,3 @@
+{"timestamp": "2026-10-26T09:14:13.279316", "level": "INFO", "domain": "DESKTOP", "message": "Desktop GUI controller initialized. Screen size: 2560x1440", "data": {}}
+{"timestamp": "2026-10-26T09:14:13.324886", "level": "INFO", "domain": "DESKTOP", "message": "Hardware enumerated: 1 display(s), 1 drive(s)", "data": {}}
+{"timestamp": "2026-10-26T09:14:13.327666", "level": "ACTION", "domain": "DESKTOP", "message": "Dispatching low-level Win32 SendInput keystrokes: 'NovaApex...'", "data": {}}
