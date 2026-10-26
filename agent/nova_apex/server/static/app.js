@@ -370,27 +370,423 @@ async function pollTelemetry() {
 }
 
 async function loadVault() {
-  try {
-    const res = await fetch("/api/vault");
-    const data = await res.json();
-    const vaultList = document.getElementById("vault-list");
+  loadVaultTable();
+}
 
-    if (!data.created_accounts || data.created_accounts.length === 0) {
-      vaultList.innerHTML = `<div class="vault-empty">No credentials generated yet.</div>`;
+// =========================================================================
+// OMNI HUB TAB SWITCHING & MANAGEMENT ENGINES
+// =========================================================================
+
+let currentTab = "terminal";
+let activeFilePath = null;
+
+function switchHubTab(tabName) {
+  currentTab = tabName;
+  const tabs = ["terminal", "workspace", "os", "mobile", "vault"];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`tab-btn-${t}`);
+    const content = document.getElementById(`tab-${t}`);
+    if (btn) {
+      if (t === tabName) btn.classList.add("active");
+      else btn.classList.remove("active");
+    }
+    if (content) {
+      content.style.display = (t === tabName) ? "grid" : "none";
+    }
+  });
+
+  if (tabName === "workspace") {
+    loadWorkspaceTree();
+  } else if (tabName === "os") {
+    loadWindowsList();
+    loadProcessList();
+  } else if (tabName === "mobile") {
+    loadMobileDetails();
+  } else if (tabName === "vault") {
+    loadVaultTable();
+  }
+}
+
+// 1. Workspace File Explorer
+async function loadWorkspaceTree() {
+  const container = document.getElementById("file-tree-list");
+  if (!container) return;
+  container.innerHTML = `<div class="empty-state">Loading workspace tree...</div>`;
+
+  try {
+    const res = await fetch("/api/manage/workspace/tree");
+    const data = await res.json();
+    if (!data.items || data.items.length === 0) {
+      container.innerHTML = `<div class="empty-state">Workspace is empty. Create a file above or execute a mission.</div>`;
       return;
     }
 
-    vaultList.innerHTML = "";
-    data.created_accounts.forEach(acc => {
-      const entry = document.createElement("div");
-      entry.className = "vault-entry";
-      entry.innerHTML = `
-        <span class="vault-service">${acc.service}</span>
-        <span class="vault-user">👤 ${acc.username}</span>
+    container.innerHTML = "";
+    data.items.forEach(item => {
+      const node = document.createElement("div");
+      node.className = `tree-node ${item.path === activeFilePath ? 'file-active' : ''}`;
+      const icon = item.type === "directory" ? "📁" : "📄";
+      const sizeStr = item.type === "file" ? `${item.size} B` : "";
+
+      node.innerHTML = `
+        <div class="node-info">
+          <span>${icon}</span>
+          <span>${escapeHtml(item.path)}</span>
+        </div>
+        <span class="node-size">${sizeStr}</span>
       `;
-      vaultList.appendChild(entry);
+
+      if (item.type === "file") {
+        node.onclick = () => openWorkspaceFile(item.path);
+      }
+      container.appendChild(node);
     });
-  } catch (e) {}
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Failed to load tree: ${e}</div>`;
+  }
+}
+
+async function openWorkspaceFile(path) {
+  activeFilePath = path;
+  document.getElementById("active-file-title").innerText = `FILE: ${path}`;
+  const editor = document.getElementById("file-editor-content");
+  editor.value = "Loading content...";
+
+  document.querySelectorAll(".tree-node").forEach(node => {
+    if (node.innerText.includes(path)) {
+      node.classList.add("file-active");
+    } else {
+      node.classList.remove("file-active");
+    }
+  });
+
+  try {
+    const res = await fetch(`/api/manage/workspace/file?path=${encodeURIComponent(path)}`);
+    if (res.ok) {
+      const data = await res.json();
+      editor.value = data.content;
+      showToast(`Opened ${path}`);
+    } else {
+      showToast(`Failed to open ${path}`);
+      editor.value = "";
+    }
+  } catch (e) {
+    showToast(`Error reading file: ${e}`);
+  }
+}
+
+async function saveActiveFile() {
+  if (!activeFilePath) {
+    const newName = prompt("Enter new file relative path (e.g. app.py, src/index.js):");
+    if (!newName) return;
+    activeFilePath = newName.trim();
+  }
+
+  const content = document.getElementById("file-editor-content").value;
+  try {
+    const res = await fetch("/api/manage/workspace/file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: activeFilePath, content })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Saved ${activeFilePath} (${data.bytes} bytes)`);
+      loadWorkspaceTree();
+    } else {
+      showToast("Error saving file");
+    }
+  } catch (e) {
+    showToast("Error saving file: " + e);
+  }
+}
+
+async function deleteActiveFile() {
+  if (!activeFilePath) {
+    showToast("No active file selected to delete.");
+    return;
+  }
+  if (!confirm(`Are you sure you want to permanently delete '${activeFilePath}'?`)) return;
+
+  try {
+    const res = await fetch(`/api/manage/workspace/file?path=${encodeURIComponent(activeFilePath)}`, {
+      method: "DELETE"
+    });
+    if (res.ok) {
+      showToast(`Deleted ${activeFilePath}`);
+      activeFilePath = null;
+      document.getElementById("active-file-title").innerText = "FILE EDITOR";
+      document.getElementById("file-editor-content").value = "";
+      loadWorkspaceTree();
+    } else {
+      showToast("Failed to delete file");
+    }
+  } catch (e) {
+    showToast("Error deleting file: " + e);
+  }
+}
+
+// 2. OS Windows & Processes
+async function loadWindowsList() {
+  const tbody = document.getElementById("windows-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="3" class="empty-state">Scanning active windows...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/manage/windows");
+    const data = await res.json();
+    if (!data.windows || data.windows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No visible windows found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = "";
+    data.windows.forEach(w => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><span class="badge-tag cyan">HWND ${w.hwnd}</span></td>
+        <td style="font-weight: 500;">${escapeHtml(w.title)}</td>
+        <td>
+          <button class="btn-sm" onclick="focusWindow(${w.hwnd})">🔍 Focus</button>
+          <button class="btn-danger-sm" onclick="closeWindow(${w.hwnd})">✕ Close</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="3" class="empty-state">Error scanning windows: ${e}</td></tr>`;
+  }
+}
+
+async function focusWindow(hwnd) {
+  try {
+    const res = await fetch("/api/manage/windows/focus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hwnd })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Window HWND ${hwnd} focused`);
+    } else {
+      showToast(`Failed to focus HWND ${hwnd}`);
+    }
+  } catch (e) {
+    showToast("Error focusing window: " + e);
+  }
+}
+
+async function closeWindow(hwnd) {
+  if (!confirm(`Send WM_CLOSE signal to HWND ${hwnd}?`)) return;
+  try {
+    const res = await fetch("/api/manage/windows/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hwnd })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Window HWND ${hwnd} closed.`);
+      setTimeout(loadWindowsList, 1000);
+    } else {
+      showToast("Error closing window");
+    }
+  } catch (e) {
+    showToast("Error: " + e);
+  }
+}
+
+async function loadProcessList() {
+  const tbody = document.getElementById("process-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="3" class="empty-state">Inspecting running processes...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/manage/processes");
+    const data = await res.json();
+    if (!data.processes || data.processes.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No process data available.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = "";
+    data.processes.forEach(p => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><span class="badge-tag green">PID ${p.Id || p.PID || '--'}</span></td>
+        <td style="font-weight: 600;">${escapeHtml(p.ProcessName || p.Name || '--')}</td>
+        <td>${p.MemoryMB || '--'} MB</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="3" class="empty-state">Error loading processes: ${e}</td></tr>`;
+  }
+}
+
+// 3. Mobile ADB Telemetry & OTP Interceptor
+async function loadMobileDetails() {
+  const card = document.getElementById("mobile-info-card");
+  if (!card) return;
+  card.innerHTML = `<div class="empty-state">Querying ADB hardware telemetry...</div>`;
+
+  try {
+    const res = await fetch("/api/manage/mobile/info");
+    const data = await res.json();
+    if (!data.connected) {
+      card.innerHTML = `
+        <div class="empty-state">
+          ⚠️ No active Android device or emulator detected via ADB.<br>
+          <span style="font-size: 11px; color: var(--text-muted); margin-top: 6px; display: inline-block;">
+            Connect an Android device with USB debugging or start an Android virtual emulator.
+          </span>
+        </div>
+      `;
+      return;
+    }
+
+    card.innerHTML = `
+      <div class="mobile-info-item">
+        <span>Device ID:</span>
+        <span class="badge-tag cyan">${data.device_id || '--'}</span>
+      </div>
+      <div class="mobile-info-item">
+        <span>Model:</span>
+        <span style="font-weight: 600;">${escapeHtml(data.model || 'Generic Android')}</span>
+      </div>
+      <div class="mobile-info-item">
+        <span>Android OS:</span>
+        <span>Version ${escapeHtml(data.android_version || '--')}</span>
+      </div>
+      <div class="mobile-info-item">
+        <span>Battery:</span>
+        <span class="badge-tag green">${data.battery_level !== null ? data.battery_level + '%' : '--'}</span>
+      </div>
+    `;
+  } catch (e) {
+    card.innerHTML = `<div class="empty-state">ADB query error: ${e}</div>`;
+  }
+}
+
+async function sendMobileKey(keycode) {
+  showToast(`Dispatching ADB Keycode: ${keycode}...`);
+  try {
+    const res = await fetch("/api/manage/mobile/keyevent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keycode })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Keycode ${keycode} dispatched!`);
+    } else {
+      showToast(`ADB error: ${data.output || 'Failed'}`);
+    }
+  } catch (e) {
+    showToast("Error sending mobile key: " + e);
+  }
+}
+
+async function scanMobileOTP() {
+  const box = document.getElementById("otp-interceptor-box");
+  box.innerHTML = `<p>Scanning notification stream for 2FA / OTP codes...</p>`;
+  try {
+    const res = await fetch("/api/manage/mobile/otp");
+    const data = await res.json();
+    if (data.connected && data.otp) {
+      box.innerHTML = `
+        <p style="color: var(--accent-green); font-weight: 700;">INTERCEPTED 2FA CODE</p>
+        <div class="otp-code-display">${escapeHtml(data.otp)}</div>
+        <div class="otp-timestamp">Source: Device ${escapeHtml(data.device)} • Just now</div>
+        <button class="btn-sm" onclick="navigator.clipboard.writeText('${data.otp}'); showToast('OTP copied to clipboard!');">📋 Copy OTP Code</button>
+      `;
+      showToast(`2FA Code Detected: ${data.otp}`);
+    } else {
+      box.innerHTML = `
+        <p>No new 2FA / verification codes found in notification stream.</p>
+        <span class="sub-text">Send an SMS or trigger a 2FA prompt to the connected device and click Scan.</span>
+      `;
+      showToast(data.message || "No OTP codes found.");
+    }
+  } catch (e) {
+    box.innerHTML = `<p>Error scanning for OTP: ${e}</p>`;
+  }
+}
+
+// 4. Credential Vault Management
+async function loadVaultTable() {
+  const tbody = document.getElementById("vault-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Querying secure vault...</td></tr>`;
+
+  try {
+    const res = await fetch("/api/vault");
+    const data = await res.json();
+    const creds = data.credentials || [];
+    const accounts = data.created_accounts || [];
+
+    const allEntries = [...creds];
+    accounts.forEach(acc => {
+      if (!allEntries.some(c => c.service === acc.service && c.username === acc.username)) {
+        allEntries.push({
+          service: acc.service,
+          username: acc.username,
+          secret: acc.password || "••••••••",
+          timestamp: acc.timestamp || new Date().toISOString()
+        });
+      }
+    });
+
+    if (allEntries.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No credentials stored in vault yet.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = "";
+    allEntries.forEach(item => {
+      const tr = document.createElement("tr");
+      const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString() : '--';
+      tr.innerHTML = `
+        <td><span class="badge-tag cyan">${escapeHtml(item.service)}</span></td>
+        <td style="font-weight: 600;">👤 ${escapeHtml(item.username)}</td>
+        <td><code>${escapeHtml(item.secret || '••••••••')}</code></td>
+        <td style="color: var(--text-muted); font-size: 10px;">${timeStr}</td>
+        <td>
+          <button class="btn-danger-sm" onclick="deleteVaultEntry('${escapeHtml(item.service)}', '${escapeHtml(item.username)}')">🗑️ Delete</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Error loading vault: ${e}</td></tr>`;
+  }
+}
+
+async function deleteVaultEntry(service, username) {
+  if (!confirm(`Delete credential for ${service} (${username})?`)) return;
+  try {
+    const res = await fetch(`/api/manage/vault/credential?service=${encodeURIComponent(service)}&username=${encodeURIComponent(username)}`, {
+      method: "DELETE"
+    });
+    if (res.ok) {
+      showToast(`Deleted ${service} credential`);
+      loadVaultTable();
+    } else {
+      showToast("Failed to delete credential");
+    }
+  } catch (e) {
+    showToast("Error deleting credential: " + e);
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function setupInteractiveViewport() {

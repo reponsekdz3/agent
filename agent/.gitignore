@@ -1,0 +1,4 @@
+echo "*.exe" >> .gitignore
+echo "*.msi" >> .gitignore
+git add .gitignore
+git commit -m "Ignore installer files"

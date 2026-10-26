@@ -331,6 +331,21 @@ async def send_mobile_keyevent(req: MobileKeyRequest):
     ))
     return {"success": res.success, "output": res.output}
 
+@app.get("/api/manage/windows")
+async def get_manage_windows():
+    from nova_apex.controllers.desktop_controller import desktop_controller
+    return {"windows": desktop_controller.list_open_windows()}
+
+@app.get("/api/manage/mobile/otp")
+async def get_mobile_otp():
+    from nova_apex.controllers.mobile_controller import mobile_controller
+    devices = mobile_controller.get_connected_devices()
+    if not devices:
+        return {"connected": False, "otp": None, "message": "No ADB device connected"}
+    target = mobile_controller.active_device or devices[0]
+    otp = mobile_controller.extract_latest_otp(target)
+    return {"connected": True, "device": target, "otp": otp}
+
 # 4. Browser Tabs & Cookies Management
 @app.get("/api/manage/browser/tabs")
 async def get_browser_tabs():

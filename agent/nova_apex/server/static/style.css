@@ -767,3 +767,319 @@ textarea#goal-prompt:focus {
 #screen-img {
   cursor: crosshair;
 }
+
+/* =========================================================================
+   OMNI HUB TABS & MANAGEMENT STYLING
+   ========================================================================= */
+
+.hub-tabs-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(18, 20, 30, 0.7);
+  padding: 4px;
+  border-radius: 24px;
+  border: 1px solid var(--border-color);
+}
+
+.hub-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 18px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.hub-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.hub-tab.active {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 12px var(--accent-cyan-glow);
+}
+
+/* File Tree & Code Editor */
+.file-tree-container {
+  max-height: 520px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  background: rgba(10, 11, 16, 0.6);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.tree-node {
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.tree-node:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tree-node.file-active {
+  background: rgba(0, 240, 255, 0.15);
+  border-left: 2px solid var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.tree-node .node-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-node .node-size {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.code-editor {
+  width: 100%;
+  min-height: 480px;
+  background: #090a0f;
+  color: #d1d5db;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  outline: none;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.code-editor:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Management Tables (Windows, Processes, Vault) */
+.management-table-container {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(10, 11, 16, 0.6);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+}
+
+.data-table th {
+  background: rgba(20, 24, 38, 0.9);
+  padding: 10px 14px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.data-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  vertical-align: middle;
+}
+
+.data-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.badge-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.badge-tag.cyan {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.badge-tag.green {
+  background: rgba(0, 255, 136, 0.15);
+  color: var(--accent-green);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+/* Mobile Management Controls */
+.mobile-info-card {
+  background: rgba(10, 11, 16, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.mobile-info-item {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 4px 0;
+}
+
+.mobile-info-item span:first-child {
+  color: var(--text-muted);
+}
+
+.mobile-btn-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.btn-mobile-key {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 12px 10px;
+  border-radius: 8px;
+  font-family: var(--font-heading);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-mobile-key:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  transform: translateY(-1px);
+}
+
+.btn-mobile-key:active {
+  transform: translateY(1px);
+}
+
+/* OTP Interceptor Card */
+.otp-interceptor-box {
+  background: rgba(10, 11, 16, 0.6);
+  border: 1px dashed var(--accent-cyan);
+  border-radius: 8px;
+  padding: 24px;
+  text-align: center;
+  font-family: var(--font-mono);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  gap: 12px;
+}
+
+.otp-code-display {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  color: var(--accent-green);
+  text-shadow: 0 0 16px rgba(0, 255, 136, 0.5);
+  background: rgba(0, 255, 136, 0.1);
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-green);
+}
+
+.otp-timestamp {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* General Micro-Buttons */
+.btn-sm {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-sm:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: var(--accent-cyan);
+  color: #fff;
+}
+
+.btn-danger-sm {
+  background: rgba(255, 51, 102, 0.15);
+  border: 1px solid rgba(255, 51, 102, 0.3);
+  color: var(--accent-red);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-danger-sm:hover {
+  background: rgba(255, 51, 102, 0.3);
+  border-color: var(--accent-red);
+  color: #fff;
+}
+
+.btn-xs {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.btn-xs:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}

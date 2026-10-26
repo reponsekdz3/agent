@@ -15,6 +15,11 @@
       "service": "github.com",
       "username": "nova_tester",
       "timestamp": "2026-10-26T08:15:48.990307"
+    },
+    {
+      "service": "test_service.org",
+      "username": "test_admin",
+      "timestamp": "2026-10-26T10:03:42.368368"
     }
   ],
   "saved_entities": {},
