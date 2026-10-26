@@ -93,6 +93,8 @@ async def enforce_safe_bind_configuration():
         )
     if settings.auth_password and len(settings.auth_password) < 16:
         raise RuntimeError("NOVA_APEX_AUTH_PASSWORD must contain at least 16 characters.")
+    if settings.auth_password and not _is_loopback_host(settings.server_host) and not settings.auth_cookie_secure:
+        raise RuntimeError("NOVA_APEX_COOKIE_SECURE=true is required for authenticated non-loopback access.")
     if settings.auth_password and os.name != "nt":
         raise RuntimeError("Authenticated remote control currently requires Windows DPAPI vault protection.")
     if settings.auth_session_ttl_seconds < 60:
@@ -102,24 +104,27 @@ async def enforce_safe_bind_configuration():
 async def protect_control_api(request: Request, call_next):
     path = request.url.path
     is_auth_endpoint = path in {"/api/auth/status", "/api/auth/login"}
+    response = None
 
     if path.startswith("/api/") and not is_auth_endpoint:
         origin = request.headers.get("origin")
         if not _origin_matches_host(origin, request.headers.get("host")):
-            return JSONResponse({"detail": "Cross-origin requests are not allowed."}, status_code=403)
+            response = JSONResponse({"detail": "Cross-origin requests are not allowed."}, status_code=403)
 
-        if settings.auth_password:
+        elif settings.auth_password:
             session = _get_session(request.cookies.get(AUTH_COOKIE_NAME))
             if not session:
-                return JSONResponse({"detail": "Authentication required."}, status_code=401)
-            request.state.auth_session = session
+                response = JSONResponse({"detail": "Authentication required."}, status_code=401)
+            else:
+                request.state.auth_session = session
 
-            if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            if response is None and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
                 csrf_token = request.headers.get("x-csrf-token", "")
                 if not hmac.compare_digest(csrf_token, session["csrf_token"]):
-                    return JSONResponse({"detail": "A valid CSRF token is required."}, status_code=403)
+                    response = JSONResponse({"detail": "A valid CSRF token is required."}, status_code=403)
 
-    response = await call_next(request)
+    if response is None:
+        response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -159,6 +164,13 @@ async def login(req: LoginRequest, request: Request):
         recent_failures.append(now)
         _failed_logins[client_host] = recent_failures
         raise HTTPException(status_code=401, detail="Invalid password.")
+
+    if len(_auth_sessions) >= 2048:
+        for session_key, session in list(_auth_sessions.items()):
+            if session["expires_at"] <= now:
+                _auth_sessions.pop(session_key, None)
+        if len(_auth_sessions) >= 2048:
+            raise HTTPException(status_code=503, detail="Session capacity reached. Try again later.")
 
     _failed_logins.pop(client_host, None)
     session_id = secrets.token_urlsafe(32)
@@ -256,6 +268,7 @@ class DirectClickRequest(BaseModel):
     x: int
     y: int
     domain: str = "desktop"
+    confirmed: bool = False
 
 class BrowserNavigateRequest(BaseModel):
     url: str
@@ -311,7 +324,11 @@ async def browser_direct_action(req: BrowserActionRequest):
     }
     if action_type not in allowed_actions:
         raise HTTPException(status_code=400, detail=f"Action {req.action} is not a browser action.")
-    if action_type in {ActionType.SUBMIT_FORM, ActionType.EVALUATE_JS} and not req.confirmed:
+    if action_type in {
+        ActionType.CLICK_ELEMENT,
+        ActionType.SUBMIT_FORM,
+        ActionType.EVALUATE_JS
+    } and not req.confirmed:
         raise HTTPException(status_code=428, detail="This action requires explicit confirmation.")
     res = await browser_controller.execute_action(ActionRequest(
         domain=ActionDomain.BROWSER,
@@ -341,6 +358,8 @@ async def toggle_browser_mode():
 @app.post("/api/interact/click")
 async def direct_click(req: DirectClickRequest):
     if req.domain == "browser":
+        if not req.confirmed:
+            raise HTTPException(status_code=428, detail="Browser clicks require explicit confirmation.")
         from nova_apex.controllers.browser_controller import browser_controller
         if browser_controller.page:
             await browser_controller.move_mouse(req.x, req.y)
@@ -379,8 +398,12 @@ async def websocket_endpoint(websocket: WebSocket):
         for entry in agent_logger.history[-50:]:
             await websocket.send_json(entry)
         while True:
-            # Keep alive / receive client events
-            await websocket.receive_text()
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                if settings.auth_password and not _get_session(websocket.cookies.get(AUTH_COOKIE_NAME)):
+                    await websocket.close(code=1008)
+                    return
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
     except Exception:
@@ -593,7 +616,7 @@ class CredentialItem(BaseModel):
     service: str
     username: str
     secret: str
-    extra: Dict[str, Any] = {}
+    extra: Dict[str, Any] = Field(default_factory=dict)
 
 @app.get("/api/manage/vault/credentials")
 async def list_vault_credentials():

@@ -18,7 +18,7 @@ class SystemSettings(BaseModel):
 
     # Browser Automation
     browser_headless: bool = Field(default_factory=lambda: os.getenv("BROWSER_HEADLESS", "false").lower() == "true")
-    browser_stealth: bool = Field(default_factory=lambda: os.getenv("BROWSER_STEALTH", "true").lower() == "true")
+    browser_stealth: bool = Field(default_factory=lambda: os.getenv("BROWSER_STEALTH", "false").lower() == "true")
     browser_viewport_width: int = Field(default_factory=lambda: int(os.getenv("BROWSER_VIEWPORT_WIDTH", "1280")))
     browser_viewport_height: int = Field(default_factory=lambda: int(os.getenv("BROWSER_VIEWPORT_HEIGHT", "800")))
     user_data_dir: Path = Field(default_factory=lambda: ROOT_DIR / "data" / "browser_profiles")

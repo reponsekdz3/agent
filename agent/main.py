@@ -14,7 +14,7 @@ def main():
     parser.add_argument("--server", action="store_true", help="Launch Mission Control web server and UI")
     parser.add_argument("--port", type=int, default=settings.server_port, help="Port to run web server on")
     parser.add_argument("--goal", type=str, help="Execute a single natural language mission goal and exit")
-    parser.add_argument("--account-url", type=str, help="Execute automated account creation on target URL")
+    parser.add_argument("--account-url", type=str, help="Prepare a registration form for review; never submit it")
 
     args = parser.parse_args()
 
@@ -34,7 +34,7 @@ def main():
 
     elif args.account_url:
         from nova_apex.skills.web_account_creator import web_account_creator
-        print(f"Creating account on: {args.account_url}")
+        print(f"Preparing registration form for user review at: {args.account_url}")
         res = asyncio.run(web_account_creator.create_account(args.account_url))
         print(f"Result: {res}")
 

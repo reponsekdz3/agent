@@ -1,130 +1,55 @@
-# ⚡ NOVA-APEX // Universal Autonomous Automation OS
+# NOVA-APEX Local Control Dashboard
 
-> **Production-Grade Next-Gen Cross-Platform Computer-Use & Web Automation Agent System**  
-> Operates across **Web Browsers (Playwright Stealth)**, **Desktop GUI (Windows / PyAutoGUI)**, **Mobile Devices (Android ADB)**, and **Terminal Shell**.
+NOVA-APEX is a Windows-hosted automation controller with a responsive browser dashboard. It can coordinate the configured browser, Windows desktop, Android ADB device, and files inside the configured workspace. It does **not** provide arbitrary access to every device or service.
 
----
+## Safe setup
 
-## 🌟 Key Capabilities
+1. Use the existing virtual environment and install the dependencies from `requirements.txt` if needed:
 
-### 1. 🌐 Autonomous Web & Internet Engine
-- **Stealth Playwright Automation:** Automated Chromium browser with bot-evasion fingerprints, stealth webdriver masking, and human typing cadence.
-- **Auto Account Creation & Form Filling:** Automatically scans DOM for registration inputs (`email`, `username`, `password`, `terms`), synthesizes persona credentials, fills inputs, and clicks submit.
-- **Visual Verification & Snapshots:** Real-time DOM extraction, accessibility tree grounding, and full-page viewport screenshots.
-- **Credential Vault Integration:** Automatically persists generated credentials, tokens, and cookies to `data/artifacts/agent_memory_vault.json`.
+   ```powershell
+   .\venv\Scripts\Activate.ps1
+   ```
 
-### 2. 🖥️ Desktop OS & Computer-Use Engine
-- **GUI Interaction:** Precise mouse moves, single/double clicks, drags, and keystrokes with hardware-level failsafe protection.
-- **Multimodal Visual Grounding:** Captures desktop state snapshots for AI vision models.
-- **Complete Filesystem Manipulation:** Creates folders, reads/writes code files, generates project scaffolds, and searches workspace directories.
+2. Copy `.env.example` to `.env`. The default server bind is `127.0.0.1`; leave it there for local-only use.
+3. Start the dashboard:
 
-### 3. 📱 Mobile Device Engine (Android ADB)
-- **Auto-Discovery:** Automatically detects connected Android physical devices and emulators over USB or TCP/IP.
-- **Remote Mobile Control:** ADB tap, swipe gestures, text input, and hardware keyevents (Home, Back, Enter, App Switcher).
-- **UI Automator Dump:** Pulls mobile XML hierarchy dumps and direct frame buffer screenshots.
+   ```powershell
+   python main.py --server
+   ```
 
-### 4. 🧠 Autonomous Cognitive Architecture
-- **Hierarchical Planner:** Converts high-level natural language prompts into executable DAG milestone graphs.
-- **Dynamic Self-Healing:** Catches runtime failures and automatically invokes the replanner to synthesize alternate paths.
-- **Dual-Tier Memory System:** Short-term scratchpad with variable expansion (`${username}`, `${password}`) + Persistent Long-term Knowledge Vault.
-- **Multi-Model Provider:** Built-in support for Google Gemini, OpenAI (GPT-4o), Anthropic Claude, Ollama, and an Autonomous Heuristic Engine fallback.
+4. Open <http://127.0.0.1:8000>.
 
-### 5. 🎛️ Real-Time Mission Control Web Dashboard
-- Cybernetic dark glassmorphic UI running on FastAPI & WebSockets.
-- Live stream of agent thinking, perception viewport, step milestone graphs, and account vault.
+The local-only default does not require a dashboard password. For authenticated access on a private network, set a unique `NOVA_APEX_AUTH_PASSWORD` of at least 16 characters, retain `NOVA_APEX_COOKIE_SECURE=true`, and configure the network edge as described below. Do not expose the controller directly to the public internet.
 
----
+## Private remote access
 
-## 🚀 Quick Start Guide
+Keep the application behind a VPN or other private access gateway and terminate HTTPS/TLS at a trusted reverse proxy. Bind the app only to the private interface reachable from that proxy (or `127.0.0.1` when the proxy is on the same machine); do not use a public-facing `0.0.0.0` binding without an intentionally secured private-network front end. The proxy must preserve the browser's `Host` and `Origin` values and forward WebSocket upgrades. Use a strong unique dashboard password and keep `NOVA_APEX_COOKIE_SECURE=true`; authenticated non-loopback startup refuses insecure cookies. Do not disable authentication or TLS to make remote access work.
 
-### 1. Activate Environment & Run Web Dashboard
-```powershell
-# Activate virtual environment
-.\venv\Scripts\Activate.ps1
+The app uses an HttpOnly, SameSite=Strict session cookie, an expiring in-memory session, same-origin checks, and a CSRF token for state-changing API requests. Sessions are cleared on server restart. The dashboard password protects the controller; it does not protect an already compromised host or replace VPN, TLS, OS account security, or firewall rules.
 
-# Launch Mission Control Web UI
-python main.py --server --port 8000
-```
-Open **[http://localhost:8000](http://localhost:8000)** in your browser.
+## Dashboard and offline behavior
 
-### 2. Run Interactive Terminal CLI
-```powershell
-python main.py
-```
+- The responsive PWA caches only the static application shell. API data and automation are not available offline.
+- A mission queued while offline is stored locally in that browser's IndexedDB. It is not sent automatically: review and confirm each queued mission while the controller is reachable.
+- Browser actions that click a page element, submit a form, or run page JavaScript require explicit confirmation. The engine pauses for review before consequential browser actions, including clicks that could place an order or book a reservation.
+- Order, booking, and registration tasks are assisted workflows only: search, compare, and prepare a draft, then stop for user review. Final purchase, booking, payment, or submission is never autonomous.
+- CAPTCHA and anti-bot bypass, automated OTP retrieval/injection, and automatic account submission are not supported.
+- Workspace file access is limited to paths beneath `WORKSPACE_DIR`. The vault is protected with Windows DPAPI; retain access to the same Windows user profile to read it. Do not copy the vault to another account or machine as a backup.
 
-### 3. Direct Headless Mission Execution
-```powershell
-# Create an automated account on GitHub
-python main.py --account-url "https://github.com/signup"
+## Configuration
 
-# Execute a complex multi-domain goal
-python main.py --goal "Scaffold fullstack app, create folders and files, capture desktop screenshot"
-```
+See `.env.example` for the supported environment variables. Relevant settings:
 
----
+- `SERVER_HOST` and `SERVER_PORT`: loopback by default; choose a private interface only when using authenticated private access over TLS.
+- `NOVA_APEX_AUTH_PASSWORD`: optional for loopback-only use; required for non-loopback binding, minimum 16 characters.
+- `NOVA_APEX_COOKIE_SECURE`: keep `true` for HTTPS and all authenticated non-loopback access.
+- `NOVA_APEX_SESSION_TTL_SECONDS`: session lifetime, minimum 60 seconds.
+- `WORKSPACE_DIR`: workspace root for dashboard file operations.
+- `ADB_ENABLED`, `ADB_DEVICE_ID`: optional Android Debug Bridge configuration.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`: optional model-provider credentials. Use an appropriately scoped account and protect `.env`.
 
-## 📁 System Architecture
+## Limits
 
-```
-agent/
-├── nova_apex/
-│   ├── config/
-│   │   └── settings.py              # Environment configuration & directory bindings
-│   ├── core/
-│   │   ├── engine.py                # Main Autonomous Orchestration Loop
-│   │   ├── planner.py               # Hierarchical Planner & Self-Healing Replanner
-│   │   ├── memory.py                # Dual-tier working memory & credential vault
-│   │   ├── llm_provider.py          # Multi-LLM provider & Heuristic fallback
-│   │   ├── logger.py                # Rich console & real-time WebSocket logger
-│   │   └── schemas.py               # Pydantic schemas (ActionRequest, StepResult, PlanStep)
-│   ├── controllers/
-│   │   ├── browser_controller.py    # Stealth Playwright browser automation
-│   │   ├── desktop_controller.py    # PyAutoGUI OS automation & filesystem operations
-│   │   ├── mobile_controller.py     # Android ADB mobile automation
-│   │   └── shell_controller.py      # PowerShell / Subprocess command runner
-│   ├── skills/
-│   │   ├── web_account_creator.py   # Multi-stage automated web registration
-│   │   ├── doc_generator.py         # Autonomous code & document generator
-│   │   ├── system_admin.py          # System telemetry & disk cleanup
-│   │   └── research_agent.py        # Autonomous deep web scraper & researcher
-│   ├── server/
-│   │   ├── app.py                   # FastAPI REST API & WebSocket endpoints
-│   │   ├── ws_manager.py            # Live real-time WebSocket pub/sub
-│   │   └── static/                  # Mission Control Web Dashboard (HTML/CSS/JS)
-│   └── cli.py                       # Terminal rich interactive CLI
-├── data/
-│   ├── artifacts/                   # Saved screenshots, reports, and credential vault
-│   └── logs/                        # Structured JSONL session audit traces
-├── workspace/                       # Safe isolated user workspace directory
-├── main.py                          # Unified launcher
-├── requirements.txt                 # Dependencies manifest
-└── .env                             # Configuration & API keys
-```
+NOVA-APEX runs on the configured Windows host; the dashboard is a remote control surface, not a native cross-platform agent. Device actions require the relevant host tools and explicit device authorization. External sites may require human verification and may change their interfaces. Offline mode only preserves the app shell and a user-reviewed local queue; it cannot perform online tasks or guarantee access to local devices when the controller is unavailable.
 
----
-
-## ⚙️ Configuration (`.env`)
-
-```ini
-# LLM Providers (Optional: system works out-of-the-box with heuristic engine)
-GEMINI_API_KEY=
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-OLLAMA_BASE_URL=http://localhost:11434
-
-DEFAULT_LLM_PROVIDER=auto
-DEFAULT_MODEL=gemini-2.5-flash
-
-# Browser Settings
-BROWSER_HEADLESS=false
-BROWSER_STEALTH=true
-BROWSER_VIEWPORT_WIDTH=1280
-BROWSER_VIEWPORT_HEIGHT=800
-
-# Mobile Settings (ADB)
-ADB_ENABLED=true
-
-# Server Settings
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
-```
+Do not use the controller to access devices, accounts, websites, or files without authorization.

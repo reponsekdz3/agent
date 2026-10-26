@@ -25,7 +25,7 @@ window.fetch = async (input, init = {}) => {
 // Presets dictionary
 const PRESETS = {
   navigate_github: "Launch browser and navigate to https://github.com, inspect the page DOM, and capture high-res verification screenshot.",
-  create_account: "Navigate to GitHub signup portal at https://github.com/signup, inspect registration fields, generate secure credentials, fill out the account form, and store credentials to vault.",
+  create_account: "Navigate to GitHub signup portal at https://github.com/signup, inspect registration fields, fill the form for review, and stop before final submission.",
   scaffold_fullstack: "Scaffold a complete modern project in workspace with frontend, backend, dockerfile, documentation, and configuration files.",
   desktop_audit: "Inspect desktop screen, list all active workspace directories, verify system integrity, and capture a verification snapshot.",
   web_research: "Browse the web, research current breakthrough developments in autonomous multimodal AI agents, and generate a summary report.",
@@ -61,6 +61,18 @@ async function initApp() {
     showToast(`Controller unavailable; local queue is available. ${error.message}`);
     updateNetworkStatus(false);
     startDashboard();
+  }
+}
+
+async function decideApproval(approved) {
+  try {
+    const response = await fetch(approved ? "/api/approval/approve" : "/api/approval/reject", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not record the action decision.");
+    showToast(approved ? "Action approved; it may now run." : "Action rejected.");
+    pollStatus();
+  } catch (error) {
+    showToast(`Approval update failed: ${error.message}`);
   }
 }
 
@@ -205,6 +217,114 @@ function clearLogs() {
   document.getElementById("terminal-body").innerHTML = "";
 }
 
+function openQueueDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("nova-apex-mission-queue", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("missions", { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open the local mission queue."));
+  });
+}
+
+async function getQueuedMissions() {
+  const db = await openQueueDatabase();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("missions", "readonly").objectStore("missions").getAll();
+    request.onsuccess = () => resolve(request.result.sort((a, b) => a.createdAt - b.createdAt));
+    request.onerror = () => reject(request.error || new Error("Could not read the local mission queue."));
+  });
+}
+
+async function queueMission() {
+  const prompt = document.getElementById("goal-prompt").value.trim();
+  if (!prompt) {
+    showToast("Enter a mission before queuing it for review.");
+    return;
+  }
+  try {
+    const db = await openQueueDatabase();
+    const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction("missions", "readwrite");
+      transaction.objectStore("missions").add({ id, prompt, createdAt: Date.now() });
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error("Could not save the mission."));
+    });
+    await loadOfflineQueue();
+    showToast("Mission saved on this device. It will not run until you review and send it.");
+  } catch (error) {
+    showToast(`Unable to queue mission: ${error.message}`);
+  }
+}
+
+async function loadOfflineQueue() {
+  const container = document.getElementById("offline-queue-list");
+  if (!container || !("indexedDB" in window)) return;
+  try {
+    const missions = await getQueuedMissions();
+    document.getElementById("queue-count").innerText = `${missions.length} pending`;
+    container.replaceChildren();
+    if (!missions.length) {
+      container.innerHTML = `<div class="empty-state">No queued missions.</div>`;
+      return;
+    }
+    missions.forEach((mission) => {
+      const card = document.createElement("div");
+      card.className = "queued-mission";
+      const prompt = document.createElement("p");
+      prompt.textContent = mission.prompt;
+      const actions = document.createElement("div");
+      actions.className = "queued-mission-actions";
+      const send = document.createElement("button");
+      send.className = "btn-sm";
+      send.textContent = "Review & send";
+      send.addEventListener("click", () => sendQueuedMission(mission));
+      const remove = document.createElement("button");
+      remove.className = "btn-danger-sm";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => removeQueuedMission(mission.id));
+      actions.append(send, remove);
+      card.append(prompt, actions);
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<div class="empty-state">Queue unavailable: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function sendQueuedMission(mission) {
+  if (!confirm(`Review this mission before sending it to the controller:\n\n${mission.prompt}\n\nIt may perform actions on your devices or external websites.`)) return;
+  if (!controllerReachable) {
+    showToast("The controller is unavailable. This mission remains queued.");
+    return;
+  }
+  try {
+    const response = await fetch("/api/goal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: mission.prompt })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
+    await removeQueuedMission(mission.id, false);
+    showToast("Mission sent. Review the live execution status.");
+    pollStatus();
+  } catch (error) {
+    showToast(`Mission was not sent: ${error.message}`);
+  }
+}
+
+async function removeQueuedMission(id, refresh = true) {
+  const db = await openQueueDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction("missions", "readwrite");
+    transaction.objectStore("missions").delete(id);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error("Could not remove queued mission."));
+  });
+  if (refresh) await loadOfflineQueue();
+}
+
 // --- Mission Control Actions ---
 async function submitGoal() {
   const promptInput = document.getElementById("goal-prompt");
@@ -219,117 +339,6 @@ async function submitGoal() {
   if (!prompt) {
     showToast("Please enter an objective or select a preset first.");
     return;
-  }
-
-  function openQueueDatabase() {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open("nova-apex-mission-queue", 1);
-      request.onupgradeneeded = () => {
-        request.result.createObjectStore("missions", { keyPath: "id" });
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error || new Error("Could not open the local mission queue."));
-    });
-  }
-
-  async function getQueuedMissions() {
-    const db = await openQueueDatabase();
-    return new Promise((resolve, reject) => {
-      const request = db.transaction("missions", "readonly").objectStore("missions").getAll();
-      request.onsuccess = () => resolve(request.result.sort((a, b) => a.createdAt - b.createdAt));
-      request.onerror = () => reject(request.error || new Error("Could not read the local mission queue."));
-    });
-  }
-
-  async function queueMission() {
-    const prompt = document.getElementById("goal-prompt").value.trim();
-    if (!prompt) {
-      showToast("Enter a mission before queuing it for review.");
-      return;
-    }
-    try {
-      const db = await openQueueDatabase();
-      const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const mission = { id, prompt, createdAt: Date.now() };
-      await new Promise((resolve, reject) => {
-        const transaction = db.transaction("missions", "readwrite");
-        transaction.objectStore("missions").add(mission);
-        transaction.oncomplete = resolve;
-        transaction.onerror = () => reject(transaction.error || new Error("Could not save the mission."));
-      });
-      await loadOfflineQueue();
-      showToast("Mission saved on this device. It will not run until you review and send it.");
-    } catch (error) {
-      showToast(`Unable to queue mission: ${error.message}`);
-    }
-  }
-
-  async function loadOfflineQueue() {
-    const container = document.getElementById("offline-queue-list");
-    if (!container || !("indexedDB" in window)) return;
-    try {
-      const missions = await getQueuedMissions();
-      document.getElementById("queue-count").innerText = `${missions.length} pending`;
-      if (missions.length === 0) {
-        container.innerHTML = `<div class="empty-state">No queued missions.</div>`;
-        return;
-      }
-      container.innerHTML = "";
-      missions.forEach((mission) => {
-        const card = document.createElement("div");
-        card.className = "queued-mission";
-        const prompt = document.createElement("p");
-        prompt.textContent = mission.prompt;
-        const actions = document.createElement("div");
-        actions.className = "queued-mission-actions";
-        const send = document.createElement("button");
-        send.className = "btn-sm";
-        send.textContent = "Review & send";
-        send.addEventListener("click", () => sendQueuedMission(mission));
-        const remove = document.createElement("button");
-        remove.className = "btn-danger-sm";
-        remove.textContent = "Remove";
-        remove.addEventListener("click", () => removeQueuedMission(mission.id));
-        actions.append(send, remove);
-        card.append(prompt, actions);
-        container.appendChild(card);
-      });
-    } catch (error) {
-      container.innerHTML = `<div class="empty-state">Queue unavailable: ${escapeHtml(error.message)}</div>`;
-    }
-  }
-
-  async function sendQueuedMission(mission) {
-    if (!confirm(`Review this mission before sending it to the controller:\n\n${mission.prompt}\n\nIt may perform actions on your devices or external websites.`)) return;
-    if (!controllerReachable) {
-      showToast("The controller is unavailable. This mission remains queued.");
-      return;
-    }
-    try {
-      const response = await fetch("/api/goal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: mission.prompt })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
-      await removeQueuedMission(mission.id, false);
-      showToast("Mission sent. Review the live execution status.");
-      pollStatus();
-    } catch (error) {
-      showToast(`Mission was not sent: ${error.message}`);
-    }
-  }
-
-  async function removeQueuedMission(id, refresh = true) {
-    const db = await openQueueDatabase();
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction("missions", "readwrite");
-      transaction.objectStore("missions").delete(id);
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error || new Error("Could not remove queued mission."));
-    });
-    if (refresh) await loadOfflineQueue();
   }
 
   // Immediate UI Feedback
@@ -440,8 +449,8 @@ async function directNavigate() {
 
 async function directBrowserAction(action, target = null) {
   let confirmed = false;
-  if (action === "submit_form") {
-    confirmed = confirm("Submit the currently open website form? This may create an account or make a change on the external site.");
+  if (action === "click_element" || action === "submit_form") {
+    confirmed = confirm("Perform this action on the current website? It may submit a form, place an order, make a purchase, or book a reservation.");
     if (!confirmed) return;
   }
   if (action === "evaluate_js") {
@@ -544,6 +553,15 @@ function renderStatus(data) {
   const progressLabel = document.getElementById("progress-label");
   const stepsList = document.getElementById("steps-list");
   const counter = document.getElementById("step-counter");
+  const approvalPanel = document.getElementById("approval-panel");
+  const approvalDescription = document.getElementById("approval-description");
+  const pendingApproval = data && data.pending_approval;
+  approvalPanel.hidden = !pendingApproval;
+  if (pendingApproval) {
+    approvalDescription.textContent =
+      `${pendingApproval.title || "Action"}: ${pendingApproval.description || pendingApproval.action_type} ` +
+      `(${pendingApproval.domain} / ${pendingApproval.action_type}). Approving may cause an external change.`;
+  }
 
   if (!data || data.status === "idle") {
     statusText.innerText = "SYSTEM READY";
@@ -570,6 +588,12 @@ function renderStatus(data) {
     runBtn.disabled = true;
     runBtnText.innerText = "EXECUTING...";
     progressContainer.style.display = "block";
+  } else if (rawStatus === "WAITING_HUMAN") {
+    statusPill.style.borderColor = "var(--accent-yellow)";
+    runBtn.disabled = true;
+    runBtnText.innerText = "WAITING FOR REVIEW";
+    progressContainer.style.display = "block";
+    progressLabel.innerText = "Review the pending action above.";
   } else if (rawStatus === "SUCCESS") {
     statusPill.style.borderColor = "var(--accent-green)";
     runBtn.disabled = !controllerReachable;
@@ -1171,6 +1195,9 @@ function setupInteractiveViewport() {
 
     const badge = document.getElementById("viewport-domain-badge");
     const domainText = (badge ? badge.innerText : "desktop").toLowerCase();
+    const isBrowserClick = domainText.includes("browser");
+    const confirmed = !isBrowserClick || confirm("Click this browser location? It may submit, purchase, or book.");
+    if (!confirmed) return;
 
     showToast(`Dispatching Direct Click at (${normX}, ${normY}) on ${domainText}`);
 
@@ -1178,7 +1205,12 @@ function setupInteractiveViewport() {
       const res = await fetch("/api/interact/click", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x: normX, y: normY, domain: domainText.includes("browser") ? "browser" : "desktop" })
+        body: JSON.stringify({
+          x: normX,
+          y: normY,
+          domain: isBrowserClick ? "browser" : "desktop",
+          confirmed
+        })
       });
       const data = await res.json();
       if (data.screenshot) {
@@ -1210,6 +1242,8 @@ function setupUIActions() {
     else if (action === "submit-goal") submitGoal();
     else if (action === "toggle-pause") togglePause();
     else if (action === "abort-goal") abortGoal();
+    else if (action === "approve-action") decideApproval(true);
+    else if (action === "reject-action") decideApproval(false);
     else if (action === "queue-mission") queueMission();
     else if (action === "browser-navigate") directNavigate();
     else if (action === "browser-action") directBrowserAction(button.dataset.browserAction, button.dataset.target || null);

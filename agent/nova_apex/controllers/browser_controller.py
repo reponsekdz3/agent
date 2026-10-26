@@ -1,5 +1,6 @@
 import os
 import asyncio
+import secrets
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
@@ -115,25 +116,20 @@ class BrowserController:
                 selector = action.target or ""
                 if not selector:
                     return StepResult(action_id=action.action_id, success=False, error="A browser click target is required.")
+                if not action.params.get("user_confirmed"):
+                    return StepResult(
+                        action_id=action.action_id,
+                        success=False,
+                        error="Browser clicks require explicit user confirmation because they may submit, purchase, or book."
+                    )
                 agent_logger.action(f"Locating browser click target: {selector}", domain="BROWSER")
 
                 if "," in selector and all(p.strip().isdigit() for p in selector.replace("(", "").replace(")", "").split(",")):
                     coords = [int(p.strip()) for p in selector.replace("(", "").replace(")", "").split(",")]
-                    if not action.params.get("user_confirmed"):
-                        return StepResult(action_id=action.action_id, success=False, error="Coordinate clicks require explicit user confirmation.")
                     await self.move_mouse(coords[0], coords[1])
                     await self.page.mouse.click(coords[0], coords[1])
                 else:
                     el = await self.page.wait_for_selector(selector, state="visible", timeout=action.timeout_seconds * 1000)
-                    is_submit = await el.evaluate(
-                        "(element) => ['BUTTON', 'INPUT'].includes(element.tagName) && element.type === 'submit'"
-                    )
-                    if is_submit and not action.params.get("user_confirmed"):
-                        return StepResult(
-                            action_id=action.action_id,
-                            success=False,
-                            error="Form submission requires explicit user confirmation."
-                        )
                     await el.click()
 
                 await asyncio.sleep(0.2)
@@ -210,9 +206,9 @@ class BrowserController:
         agent_logger.info("Scanning page for registration fields...", domain="BROWSER")
         import string
 
-        rand_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        rand_id = secrets.token_hex(4)
         generated_username = f"nova_agent_{rand_id}"
-        generated_password = f"NovaApex#2026_{''.join(random.choices(string.ascii_letters + string.digits, k=8))}"
+        generated_password = f"NovaApex#{secrets.token_urlsafe(16)}"
         fields_filled = []
         supplied_email = action.params.get("email")
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "nova-apex-shell-v1";
+const CACHE_NAME = "nova-apex-shell-v2";
 const APP_SHELL = [
   "/",
   "/static/style.css",

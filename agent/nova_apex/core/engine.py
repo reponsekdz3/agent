@@ -70,14 +70,10 @@ class AutonomousEngine:
             ActionType.ADB_INSTALL_APK,
             ActionType.ADB_KEYEVENT
         }
+        if action.domain == ActionDomain.BROWSER and action.action_type == ActionType.CLICK_ELEMENT:
+            return True
         if action.action_type in always_confirm:
             return True
-        if action.action_type == ActionType.CLICK_ELEMENT:
-            target = (action.target or "").lower()
-            return "," in target or any(
-                keyword in target
-                for keyword in ("submit", "register", "sign up", "create account", "purchase", "confirm")
-            )
         return False
 
     async def _request_action_approval(self, step: PlanStep) -> bool:
@@ -85,6 +81,8 @@ class AutonomousEngine:
         self._approval_decision = None
         self.pending_approval = {
             "step_id": step.step_id,
+            "title": step.title,
+            "description": step.description,
             "domain": step.domain.value,
             "action_type": step.action_type.value
         }
@@ -182,7 +180,19 @@ class AutonomousEngine:
                         recovery_step = await planner.replan_on_error(goal, step, result.error or "Unknown error")
                         if recovery_step:
                             agent_logger.info(f"Executing recovery action: {recovery_step.title}", domain="ENGINE")
-                            rec_res = await self._dispatch_action(recovery_step.suggested_action)
+                            if self._requires_approval(recovery_step.suggested_action):
+                                if not await self._request_action_approval(recovery_step):
+                                    rec_res = StepResult(
+                                        action_id=recovery_step.suggested_action.action_id,
+                                        success=False,
+                                        error="Recovery action was not approved.",
+                                        data={"approval_rejected": True}
+                                    )
+                                else:
+                                    recovery_step.suggested_action.params["user_confirmed"] = True
+                                    rec_res = await self._dispatch_action(recovery_step.suggested_action)
+                            else:
+                                rec_res = await self._dispatch_action(recovery_step.suggested_action)
                             recovery_step.result = rec_res
                             if rec_res.success:
                                 recovery_step.status = StepStatus.SUCCESS
