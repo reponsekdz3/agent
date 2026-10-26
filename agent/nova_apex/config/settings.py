@@ -34,8 +34,11 @@ class SystemSettings(BaseModel):
     desktop_action_pause: float = Field(default_factory=lambda: float(os.getenv("DESKTOP_ACTION_PAUSE", "0.2")))
 
     # Server & Mission Control
-    server_host: str = Field(default_factory=lambda: os.getenv("SERVER_HOST", "0.0.0.0"))
+    server_host: str = Field(default_factory=lambda: os.getenv("SERVER_HOST", "127.0.0.1"))
     server_port: int = Field(default_factory=lambda: int(os.getenv("SERVER_PORT", "8000")))
+    auth_password: str = Field(default_factory=lambda: os.getenv("NOVA_APEX_AUTH_PASSWORD", ""))
+    auth_cookie_secure: bool = Field(default_factory=lambda: os.getenv("NOVA_APEX_COOKIE_SECURE", "true").lower() == "true")
+    auth_session_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv("NOVA_APEX_SESSION_TTL_SECONDS", "28800")))
     workspace_dir: Path = Field(default_factory=lambda: Path(os.getenv("WORKSPACE_DIR", str(ROOT_DIR / "workspace"))))
     artifacts_dir: Path = Field(default_factory=lambda: ROOT_DIR / "data" / "artifacts")
     session_logs_dir: Path = Field(default_factory=lambda: ROOT_DIR / "data" / "logs")

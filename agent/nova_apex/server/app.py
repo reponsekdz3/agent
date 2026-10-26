@@ -1,14 +1,18 @@
 import os
 import re
 import asyncio
+import hmac
+import ipaddress
+import secrets
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from urllib.parse import urlsplit
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from nova_apex.config.settings import settings
 from nova_apex.core.engine import engine
@@ -21,19 +25,168 @@ from nova_apex.server.ws_manager import ws_manager
 app = FastAPI(
     title="NOVA-APEX Universal Automation OS",
     description="Cross-platform Autonomous Computer-Use & Web Automation Engine",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+AUTH_COOKIE_NAME = "nova_apex_session"
+_auth_sessions: Dict[str, Dict[str, Any]] = {}
+_failed_logins: Dict[str, list[float]] = {}
 
 class GoalRequest(BaseModel):
     prompt: str
+
+class LoginRequest(BaseModel):
+    password: str
+
+class CredentialLookupRequest(BaseModel):
+    service: str
+    username: str
+
+def resolve_workspace_path(relative_path: str) -> Path:
+    root = settings.workspace_dir.resolve()
+    requested = Path(relative_path)
+    if requested.is_absolute():
+        raise HTTPException(status_code=400, detail="Workspace paths must be relative.")
+    resolved = (root / requested).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Path must remain inside the workspace.")
+    return resolved
+
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+def _get_session(session_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not session_id:
+        return None
+    session = _auth_sessions.get(session_id)
+    if not session:
+        return None
+    if session["expires_at"] <= time.time():
+        _auth_sessions.pop(session_id, None)
+        return None
+    return session
+
+def _origin_matches_host(origin: Optional[str], host: Optional[str]) -> bool:
+    if not origin:
+        return True
+    try:
+        parsed = urlsplit(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc.lower() == (host or "").lower()
+    except ValueError:
+        return False
+
+@app.on_event("startup")
+async def enforce_safe_bind_configuration():
+    if not settings.auth_password and not _is_loopback_host(settings.server_host):
+        raise RuntimeError(
+            "NOVA_APEX_AUTH_PASSWORD is required when SERVER_HOST is not a loopback address."
+        )
+    if settings.auth_password and len(settings.auth_password) < 16:
+        raise RuntimeError("NOVA_APEX_AUTH_PASSWORD must contain at least 16 characters.")
+    if settings.auth_password and os.name != "nt":
+        raise RuntimeError("Authenticated remote control currently requires Windows DPAPI vault protection.")
+    if settings.auth_session_ttl_seconds < 60:
+        raise RuntimeError("NOVA_APEX_SESSION_TTL_SECONDS must be at least 60 seconds.")
+
+@app.middleware("http")
+async def protect_control_api(request: Request, call_next):
+    path = request.url.path
+    is_auth_endpoint = path in {"/api/auth/status", "/api/auth/login"}
+
+    if path.startswith("/api/") and not is_auth_endpoint:
+        origin = request.headers.get("origin")
+        if not _origin_matches_host(origin, request.headers.get("host")):
+            return JSONResponse({"detail": "Cross-origin requests are not allowed."}, status_code=403)
+
+        if settings.auth_password:
+            session = _get_session(request.cookies.get(AUTH_COOKIE_NAME))
+            if not session:
+                return JSONResponse({"detail": "Authentication required."}, status_code=401)
+            request.state.auth_session = session
+
+            if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+                csrf_token = request.headers.get("x-csrf-token", "")
+                if not hmac.compare_digest(csrf_token, session["csrf_token"]):
+                    return JSONResponse({"detail": "A valid CSRF token is required."}, status_code=403)
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; "
+        "worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    )
+    if path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+@app.get("/api/auth/status")
+async def get_auth_status(request: Request):
+    if not settings.auth_password:
+        return {"required": False, "authenticated": True}
+    session = _get_session(request.cookies.get(AUTH_COOKIE_NAME))
+    return {
+        "required": True,
+        "authenticated": session is not None,
+        "csrf_token": session["csrf_token"] if session else None
+    }
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest, request: Request):
+    if not _origin_matches_host(request.headers.get("origin"), request.headers.get("host")):
+        raise HTTPException(status_code=403, detail="Cross-origin login is not allowed.")
+    if not settings.auth_password:
+        raise HTTPException(status_code=404, detail="Authentication is not enabled for this local-only server.")
+    client_host = request.client.host if request.client else "unknown"
+    now = time.time()
+    recent_failures = [stamp for stamp in _failed_logins.get(client_host, []) if now - stamp < 900]
+    if len(recent_failures) >= 5:
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Try again in 15 minutes.")
+    if not hmac.compare_digest(req.password, settings.auth_password):
+        recent_failures.append(now)
+        _failed_logins[client_host] = recent_failures
+        raise HTTPException(status_code=401, detail="Invalid password.")
+
+    _failed_logins.pop(client_host, None)
+    session_id = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    _auth_sessions[session_id] = {
+        "csrf_token": csrf_token,
+        "expires_at": time.time() + settings.auth_session_ttl_seconds
+    }
+    response = JSONResponse({"authenticated": True, "csrf_token": csrf_token})
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        session_id,
+        max_age=settings.auth_session_ttl_seconds,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="strict",
+        path="/"
+    )
+    return response
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    session_id = request.cookies.get(AUTH_COOKIE_NAME)
+    if session_id:
+        _auth_sessions.pop(session_id, None)
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/", httponly=True, secure=settings.auth_cookie_secure, samesite="strict")
+    return response
 
 @app.get("/api/status")
 async def get_status():
@@ -63,11 +216,26 @@ async def abort_agent():
     engine.abort()
     return {"status": "aborted"}
 
+@app.post("/api/approval/approve")
+async def approve_pending_action():
+    if not engine.approve_pending_action():
+        raise HTTPException(status_code=409, detail="There is no pending action to approve.")
+    return {"status": "approved"}
+
+@app.post("/api/approval/reject")
+async def reject_pending_action():
+    if not engine.reject_pending_action():
+        raise HTTPException(status_code=409, detail="There is no pending action to reject.")
+    return {"status": "rejected"}
+
 @app.get("/api/vault")
 async def get_vault():
     return {
         "created_accounts": agent_memory.vault.get("created_accounts", []),
-        "saved_entities": agent_memory.vault.get("saved_entities", {})
+        "saved_entities": {
+            key: {"updated_at": value.get("updated_at")}
+            for key, value in agent_memory.vault.get("saved_entities", {}).items()
+        }
     }
 
 @app.get("/api/telemetry")
@@ -97,6 +265,8 @@ class BrowserActionRequest(BaseModel):
     action: str
     target: Optional[str] = None
     value: Optional[str] = None
+    email: Optional[str] = None
+    confirmed: bool = False
 
 @app.post("/api/browser/navigate")
 async def browser_navigate(req: BrowserNavigateRequest):
@@ -123,13 +293,33 @@ async def browser_navigate(req: BrowserNavigateRequest):
 @app.post("/api/browser/action")
 async def browser_direct_action(req: BrowserActionRequest):
     from nova_apex.controllers.browser_controller import browser_controller
-    action_type = ActionType(req.action.lower()) if req.action.lower() in [a.value for a in ActionType] else ActionType.CLICK_ELEMENT
+    try:
+        action_type = ActionType(req.action.lower())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported browser action: {req.action}")
+    allowed_actions = {
+        ActionType.NAVIGATE,
+        ActionType.CLICK_ELEMENT,
+        ActionType.TYPE_ELEMENT,
+        ActionType.EXTRACT_CONTENT,
+        ActionType.BROWSER_SCREENSHOT,
+        ActionType.SUBMIT_FORM,
+        ActionType.CREATE_ACCOUNT,
+        ActionType.EVALUATE_JS,
+        ActionType.SWITCH_TAB,
+        ActionType.CLOSE_BROWSER
+    }
+    if action_type not in allowed_actions:
+        raise HTTPException(status_code=400, detail=f"Action {req.action} is not a browser action.")
+    if action_type in {ActionType.SUBMIT_FORM, ActionType.EVALUATE_JS} and not req.confirmed:
+        raise HTTPException(status_code=428, detail="This action requires explicit confirmation.")
     res = await browser_controller.execute_action(ActionRequest(
         domain=ActionDomain.BROWSER,
         action_type=action_type,
         description=f"Direct action {req.action}",
         target=req.target,
-        value=req.value
+        value=req.value,
+        params={"user_confirmed": req.confirmed, "email": req.email}
     ))
     return {
         "success": res.success,
@@ -153,7 +343,7 @@ async def direct_click(req: DirectClickRequest):
     if req.domain == "browser":
         from nova_apex.controllers.browser_controller import browser_controller
         if browser_controller.page:
-            await browser_controller.human_mouse_move(req.x, req.y)
+            await browser_controller.move_mouse(req.x, req.y)
             await browser_controller.page.mouse.click(req.x, req.y)
             shot = await browser_controller.take_screenshot("interactive_click")
             return {"success": True, "screenshot": shot}
@@ -169,13 +359,20 @@ async def direct_click(req: DirectClickRequest):
 
 @app.get("/api/artifacts/{filename}")
 async def get_artifact(filename: str):
-    file_path = settings.artifacts_dir / filename
-    if not file_path.exists():
+    artifact_root = settings.artifacts_dir.resolve()
+    file_path = (artifact_root / filename).resolve()
+    if file_path.parent != artifact_root or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(str(file_path))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if not _origin_matches_host(websocket.headers.get("origin"), websocket.headers.get("host")):
+        await websocket.close(code=1008)
+        return
+    if settings.auth_password and not _get_session(websocket.cookies.get(AUTH_COOKIE_NAME)):
+        await websocket.close(code=1008)
+        return
     await ws_manager.connect(websocket)
     try:
         # Send current logs history immediately on connection
@@ -219,7 +416,7 @@ async def get_workspace_tree():
 
 @app.get("/api/manage/workspace/file")
 async def get_workspace_file(path: str):
-    target = settings.workspace_dir / path
+    target = resolve_workspace_path(path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found in workspace")
     try:
@@ -235,7 +432,7 @@ class SaveFileRequest(BaseModel):
 
 @app.post("/api/manage/workspace/file")
 async def save_workspace_file(req: SaveFileRequest):
-    target = settings.workspace_dir / req.path
+    target = resolve_workspace_path(req.path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "w", encoding="utf-8") as f:
         f.write(req.content)
@@ -243,14 +440,12 @@ async def save_workspace_file(req: SaveFileRequest):
 
 @app.delete("/api/manage/workspace/file")
 async def delete_workspace_file(path: str):
-    target = settings.workspace_dir / path
+    target = resolve_workspace_path(path)
     if target.exists():
         if target.is_file():
             target.unlink()
-        elif target.is_dir():
-            import shutil
-            shutil.rmtree(target)
-        return {"success": True, "deleted": path}
+            return {"success": True, "deleted": path}
+        raise HTTPException(status_code=400, detail="Only workspace files can be deleted through this endpoint.")
     raise HTTPException(status_code=404, detail="Path does not exist")
 
 # 2. Desktop OS Process & Window Management
@@ -297,7 +492,7 @@ async def get_mobile_detailed_info():
     if not devices:
         return {"connected": False, "devices": []}
 
-    target = devices[0]
+    target = mobile_controller.active_device if mobile_controller.active_device in devices else devices[0]
     bin_p = mobile_controller.adb_bin
     details = {"connected": True, "device_id": target, "devices": devices}
     try:
@@ -317,7 +512,20 @@ async def get_mobile_detailed_info():
     return details
 
 class MobileKeyRequest(BaseModel):
-    keycode: int
+    keycode: int = Field(ge=0, le=288)
+
+class MobileDeviceSelectionRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=256)
+
+@app.post("/api/manage/mobile/select")
+async def select_mobile_device(req: MobileDeviceSelectionRequest):
+    from nova_apex.controllers.mobile_controller import mobile_controller
+    devices = mobile_controller.get_connected_devices()
+    if req.device_id not in devices:
+        raise HTTPException(status_code=404, detail="Selected Android device is not currently connected.")
+    mobile_controller.active_device = req.device_id
+    settings.adb_device_id = req.device_id
+    return {"success": True, "device_id": req.device_id}
 
 @app.post("/api/manage/mobile/keyevent")
 async def send_mobile_keyevent(req: MobileKeyRequest):
@@ -372,9 +580,13 @@ async def get_browser_cookies():
         return {"cookies": []}
     try:
         cookies = await browser_controller.context.cookies()
-        return {"count": len(cookies), "cookies": cookies[:50]}
-    except Exception:
-        return {"cookies": []}
+        safe_cookies = [
+            {key: cookie.get(key) for key in ("name", "domain", "path", "expires", "httpOnly", "secure", "sameSite")}
+            for cookie in cookies[:50]
+        ]
+        return {"count": len(cookies), "cookies": safe_cookies}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Unable to inspect browser cookies: {e}") from e
 
 # 5. Vault CRUD Management
 class CredentialItem(BaseModel):
@@ -382,6 +594,37 @@ class CredentialItem(BaseModel):
     username: str
     secret: str
     extra: Dict[str, Any] = {}
+
+@app.get("/api/manage/vault/credentials")
+async def list_vault_credentials():
+    return {
+        "credentials": [
+            {
+                "service": credential.get("service", ""),
+                "username": credential.get("username", ""),
+                "timestamp": credential.get("timestamp", ""),
+                "status": credential.get("extra", {}).get("status", "stored")
+            }
+            for credential in agent_memory.vault.get("credentials", [])
+        ]
+    }
+
+@app.post("/api/manage/vault/credential/reveal")
+async def reveal_vault_credential(req: CredentialLookupRequest):
+    credential = next(
+        (
+            item for item in reversed(agent_memory.vault.get("credentials", []))
+            if item.get("service") == req.service and item.get("username") == req.username
+        ),
+        None
+    )
+    if not credential:
+        raise HTTPException(status_code=404, detail="Credential not found.")
+    agent_logger.info(
+        f"Credential explicitly revealed for [{req.service}] as [{req.username}]",
+        domain="SECURITY"
+    )
+    return {"secret": credential.get("secret", "")}
 
 @app.post("/api/manage/vault/credential")
 async def add_vault_credential(cred: CredentialItem):
@@ -399,12 +642,24 @@ async def delete_vault_credential(service: str, username: str):
     agent_memory.vault["credentials"] = [
         c for c in creds if not (c.get("service") == service and c.get("username") == username)
     ]
+    agent_memory.vault["created_accounts"] = [
+        account for account in agent_memory.vault.get("created_accounts", [])
+        if not (account.get("service") == service and account.get("username") == username)
+    ]
     agent_memory.save()
     return {"success": True, "service": service, "username": username}
 
 # Mount Static UI
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
+    @app.get("/service-worker.js")
+    async def serve_service_worker():
+        return FileResponse(
+            str(STATIC_DIR / "service-worker.js"),
+            media_type="application/javascript",
+            headers={"Service-Worker-Allowed": "/"}
+        )
+
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/")

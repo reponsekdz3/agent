@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0b10">
   <title>NOVA-APEX // Autonomous Automation OS</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Orbitron:wght@500;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="ambient-glow"></div>
@@ -23,14 +23,16 @@
 
     <!-- Navigation Hub Tabs -->
     <nav class="hub-tabs-nav">
-      <button class="hub-tab active" id="tab-btn-terminal" onclick="switchHubTab('terminal')">🎯 Mission Terminal</button>
-      <button class="hub-tab" id="tab-btn-workspace" onclick="switchHubTab('workspace')">🗂️ Workspace Explorer</button>
-      <button class="hub-tab" id="tab-btn-os" onclick="switchHubTab('os')">🖥️ OS & Processes</button>
-      <button class="hub-tab" id="tab-btn-mobile" onclick="switchHubTab('mobile')">📱 Mobile ADB</button>
-      <button class="hub-tab" id="tab-btn-vault" onclick="switchHubTab('vault')">🔐 Credential Vault</button>
+      <button class="hub-tab active" id="tab-btn-terminal" data-action="switch-tab" data-tab="terminal">🎯 Mission Terminal</button>
+      <button class="hub-tab" id="tab-btn-workspace" data-action="switch-tab" data-tab="workspace">🗂️ Workspace Explorer</button>
+      <button class="hub-tab" id="tab-btn-os" data-action="switch-tab" data-tab="os">🖥️ OS & Processes</button>
+      <button class="hub-tab" id="tab-btn-mobile" data-action="switch-tab" data-tab="mobile">📱 Mobile ADB</button>
+      <button class="hub-tab" id="tab-btn-vault" data-action="switch-tab" data-tab="vault">🔐 Credential Vault</button>
     </nav>
 
     <div class="nav-status">
+      <div class="telemetry-pill" id="network-status">NETWORK: CHECKING</div>
+      <div class="telemetry-pill" id="controller-status">CONTROLLER: CHECKING</div>
       <div class="status-pill" id="agent-status-pill">
         <span class="status-dot" id="status-dot"></span>
         <span id="agent-status-text">SYSTEM READY</span>
@@ -39,9 +41,10 @@
         <span class="icon">⚡</span>
         <span id="disk-info">Free: -- GB</span>
       </div>
-      <button class="btn-mode-toggle" id="btn-browser-mode" onclick="toggleBrowserVisibility()">
+      <button class="btn-mode-toggle" id="btn-browser-mode" data-action="toggle-browser-mode">
         🖥️ Mode: Headless
       </button>
+      <button class="btn-sm" id="btn-logout" data-action="logout" hidden>Sign out</button>
     </div>
   </header>
 
@@ -57,7 +60,7 @@
           <h2>AUTONOMOUS MISSION CONTROL</h2>
         </div>
         <div class="preset-dropdown">
-          <select id="preset-selector" onchange="applyPreset(this.value)">
+          <select id="preset-selector">
             <option value="">⚡ Load Quick Action Preset...</option>
             <option value="navigate_github">Navigate & Inspect GitHub</option>
             <option value="create_account">Create automated web account on GitHub</option>
@@ -79,15 +82,39 @@
         </div>
 
         <div class="action-buttons">
-          <button id="btn-run" class="btn btn-primary" onclick="submitGoal()">
+          <button id="btn-run" class="btn btn-primary" data-action="submit-goal">
             <span class="btn-icon">▶</span> <span id="run-btn-text">EXECUTE MISSION</span>
           </button>
-          <button id="btn-pause" class="btn btn-secondary" onclick="togglePause()">
+          <button id="btn-pause" class="btn btn-secondary" data-action="toggle-pause">
             <span class="btn-icon">⏸</span> PAUSE
           </button>
-          <button id="btn-abort" class="btn btn-danger" onclick="abortGoal()">
+          <button id="btn-abort" class="btn btn-danger" data-action="abort-goal">
             <span class="btn-icon">⏹</span> ABORT
           </button>
+          <button id="btn-queue" class="btn btn-secondary" data-action="queue-mission">
+            <span class="btn-icon">⌛</span> QUEUE FOR REVIEW
+          </button>
+        </div>
+      </div>
+
+      <section id="approval-panel" class="approval-panel" hidden aria-live="assertive">
+        <div>
+          <strong>Action approval required</strong>
+          <p id="approval-description">Review the action and approve or reject it.</p>
+        </div>
+        <div class="approval-actions">
+          <button class="btn btn-primary" data-action="approve-action">APPROVE THIS ACTION</button>
+          <button class="btn btn-danger" data-action="reject-action">REJECT</button>
+        </div>
+      </section>
+
+      <div class="offline-queue">
+        <div class="section-title">
+          <h3>PENDING MISSIONS — REVIEW BEFORE SENDING</h3>
+          <span class="step-counter" id="queue-count">0 pending</span>
+        </div>
+        <div id="offline-queue-list" class="offline-queue-list">
+          <div class="empty-state">No queued missions.</div>
         </div>
       </div>
 
@@ -108,16 +135,22 @@
       <!-- Direct Interactive Browser Toolbar -->
       <div class="browser-nav-bar">
         <div class="nav-controls">
-          <button class="btn-nav" title="Back" onclick="directBrowserAction('navigate', 'back')">◀</button>
-          <button class="btn-nav" title="Reload" onclick="directBrowserAction('navigate', 'reload')">↻</button>
+          <button class="btn-nav" title="Back" data-action="browser-action" data-browser-action="navigate" data-target="back">◀</button>
+          <button class="btn-nav" title="Forward" data-action="browser-action" data-browser-action="navigate" data-target="forward">▶</button>
+          <button class="btn-nav" title="Reload" data-action="browser-action" data-browser-action="navigate" data-target="reload">↻</button>
         </div>
         <div class="url-input-wrapper">
           <span class="url-prefix">https://</span>
-          <input type="text" id="browser-url-bar" placeholder="Enter website URL (e.g. github.com, wikipedia.org, google.com)..." onkeydown="if(event.key==='Enter') directNavigate()">
+          <input type="text" id="browser-url-bar" placeholder="Enter website URL (e.g. github.com, wikipedia.org, google.com)...">
         </div>
-        <button class="btn-go" onclick="directNavigate()">🚀 GO</button>
-        <button class="btn-tool" title="Take Screenshot" onclick="directBrowserAction('browser_screenshot')">📸 SNAP</button>
-        <button class="btn-tool" title="Auto-Fill Form" onclick="directBrowserAction('create_account')">👤 AUTO-FILL</button>
+        <input type="email" id="registration-email" placeholder="Email address you control (for registration fill)">
+        <button class="btn-go" data-action="browser-navigate">🚀 GO</button>
+        <button class="btn-tool" title="Take Screenshot" data-action="browser-action" data-browser-action="browser_screenshot">📸 SNAP</button>
+        <button class="btn-tool" title="Fill the form for review" data-action="browser-action" data-browser-action="create_account">👤 AUTO-FILL</button>
+        <button class="btn-tool" title="Submit the current form after confirmation" data-action="browser-action" data-browser-action="submit_form">✓ SUBMIT</button>
+      </div>
+      <div id="browser-tabs-list" class="browser-tabs-list">
+        <span class="empty-state">No browser tabs are open.</span>
       </div>
 
       <!-- Live Screen / Viewport Preview -->
@@ -153,7 +186,7 @@
           </div>
           <div class="terminal-title">LIVE REAL-TIME TELEMETRY STREAM</div>
           <div class="terminal-actions">
-            <button class="btn-xs" onclick="clearLogs()">Clear</button>
+            <button class="btn-xs" data-action="clear-logs">Clear</button>
           </div>
         </div>
         <div class="terminal-body" id="terminal-body">
@@ -174,7 +207,7 @@
           <span class="panel-icon">📁</span>
           <h2>WORKSPACE FILE TREE</h2>
         </div>
-        <button class="btn-sm" onclick="loadWorkspaceTree()">↻ Refresh</button>
+        <button class="btn-sm" data-action="refresh-workspace">↻ Refresh</button>
       </div>
       <div class="file-tree-container" id="file-tree-list">
         <div class="empty-state">Loading workspace tree...</div>
@@ -188,8 +221,8 @@
           <h2 id="active-file-title">FILE EDITOR</h2>
         </div>
         <div class="editor-actions">
-          <button class="btn-sm" onclick="saveActiveFile()">💾 Save</button>
-          <button class="btn-danger-sm" onclick="deleteActiveFile()">🗑️ Delete</button>
+          <button class="btn-sm" data-action="save-file">💾 Save</button>
+          <button class="btn-danger-sm" data-action="delete-file">🗑️ Delete</button>
         </div>
       </div>
       <textarea id="file-editor-content" class="code-editor" placeholder="Select a file from the tree to view or edit its contents..."></textarea>
@@ -206,7 +239,7 @@
           <span class="panel-icon">🪟</span>
           <h2>VISIBLE WINDOWS (WIN32 HWND)</h2>
         </div>
-        <button class="btn-sm" onclick="loadWindowsList()">↻ Scan Windows</button>
+        <button class="btn-sm" data-action="refresh-windows">↻ Scan Windows</button>
       </div>
       <div class="management-table-container">
         <table class="data-table">
@@ -226,7 +259,7 @@
           <span class="panel-icon">⚙️</span>
           <h2>TOP CPU/RAM PROCESSES</h2>
         </div>
-        <button class="btn-sm" onclick="loadProcessList()">↻ Refresh Processes</button>
+        <button class="btn-sm" data-action="refresh-processes">↻ Refresh Processes</button>
       </div>
       <div class="management-table-container">
         <table class="data-table">
@@ -251,7 +284,7 @@
           <span class="panel-icon">📱</span>
           <h2>DEVICE TELEMETRY & HARDWARE</h2>
         </div>
-        <button class="btn-sm" onclick="loadMobileDetails()">↻ Query ADB</button>
+        <button class="btn-sm" data-action="refresh-mobile">↻ Query ADB</button>
       </div>
       <div class="mobile-info-card" id="mobile-info-card">
         <div class="empty-state">Scanning for USB or Wi-Fi connected Android devices...</div>
@@ -260,12 +293,12 @@
       <div class="mobile-controls-panel">
         <div class="section-title"><h3>HARDWARE BUTTON DISPATCH</h3></div>
         <div class="mobile-btn-grid">
-          <button class="btn-mobile-key" onclick="sendMobileKey(3)">🏠 HOME</button>
-          <button class="btn-mobile-key" onclick="sendMobileKey(4)">◀ BACK</button>
-          <button class="btn-mobile-key" onclick="sendMobileKey(187)">📑 APPS</button>
-          <button class="btn-mobile-key" onclick="sendMobileKey(26)">🔒 POWER</button>
-          <button class="btn-mobile-key" onclick="sendMobileKey(24)">🔊 VOL +</button>
-          <button class="btn-mobile-key" onclick="sendMobileKey(25)">🔉 VOL -</button>
+          <button class="btn-mobile-key" data-action="mobile-key" data-keycode="3">🏠 HOME</button>
+          <button class="btn-mobile-key" data-action="mobile-key" data-keycode="4">◀ BACK</button>
+          <button class="btn-mobile-key" data-action="mobile-key" data-keycode="187">📑 APPS</button>
+          <button class="btn-mobile-key" data-action="mobile-key" data-keycode="26">🔒 POWER</button>
+          <button class="btn-mobile-key" data-action="mobile-key" data-keycode="24">🔊 VOL +</button>
+          <button class="btn-mobile-key" data-action="mobile-key" data-keycode="25">🔉 VOL -</button>
         </div>
       </div>
     </section>
@@ -276,7 +309,7 @@
           <span class="panel-icon">🔐</span>
           <h2>LIVE 2FA / OTP INTERCEPTOR</h2>
         </div>
-        <button class="btn-sm" onclick="scanMobileOTP()">⚡ Scan Notifications</button>
+        <button class="btn-sm" data-action="scan-mobile-otp">⚡ Scan Notifications</button>
       </div>
       <div class="otp-interceptor-box" id="otp-interceptor-box">
         <p>Awaiting incoming 2FA SMS or notification codes...</p>
@@ -296,7 +329,7 @@
           <h2>CENTRAL CREDENTIAL VAULT & CREATED IDENTITIES</h2>
         </div>
         <div class="vault-actions">
-          <button class="btn-sm" onclick="loadVaultTable()">↻ Refresh</button>
+          <button class="btn-sm" data-action="refresh-vault">↻ Refresh</button>
         </div>
       </div>
       <div class="management-table-container">
@@ -314,6 +347,18 @@
 
   <!-- Notification Toast -->
   <div id="toast" class="toast"></div>
+
+  <section id="auth-overlay" class="auth-overlay" hidden aria-labelledby="auth-title">
+    <form id="login-form" class="auth-dialog">
+      <div class="logo-orb pulse-glow" aria-hidden="true"></div>
+      <h2 id="auth-title">Sign in to NOVA-APEX</h2>
+      <p>Enter the controller password to access this device.</p>
+      <label for="auth-password">Controller password</label>
+      <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+      <p id="auth-error" class="auth-error" role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit">SIGN IN</button>
+    </form>
+  </section>
 
   <script src="/static/app.js"></script>
 </body>

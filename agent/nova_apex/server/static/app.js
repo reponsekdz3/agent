@@ -2,6 +2,25 @@
 let socket = null;
 let isPaused = false;
 let isHeaded = false;
+let authRequired = false;
+let csrfToken = null;
+let dashboardStarted = false;
+let controllerReachable = false;
+const nativeFetch = window.fetch.bind(window);
+
+window.fetch = async (input, init = {}) => {
+  const method = (init.method || "GET").toUpperCase();
+  const headers = new Headers(init.headers || {});
+  if (authRequired && csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
+  const response = await nativeFetch(input, { ...init, headers, credentials: "same-origin" });
+  if (response.status === 401 && !["/api/auth/status", "/api/auth/login"].includes(new URL(input, window.location.href).pathname)) {
+    authRequired = true;
+    showAuthOverlay();
+  }
+  return response;
+};
 
 // Presets dictionary
 const PRESETS = {
@@ -13,13 +32,112 @@ const PRESETS = {
   hardware_inspect: "Enumerate hardware displays, storage drives, and list all visible Windows applications."
 };
 
-function initApp() {
+async function initApp() {
+  const loginForm = document.getElementById("login-form");
+  loginForm.addEventListener("submit", login);
+  window.addEventListener("online", updateNetworkStatus);
+  window.addEventListener("offline", updateNetworkStatus);
+
+  try {
+    if ("serviceWorker" in navigator) {
+      try {
+        await navigator.serviceWorker.register("/service-worker.js");
+      } catch (error) {
+        appendLog({ level: "WARNING", domain: "OFFLINE", message: `Offline app shell is unavailable: ${error.message}` });
+      }
+    }
+    const response = await fetch("/api/auth/status");
+    if (!response.ok) throw new Error(`Authentication status failed (${response.status})`);
+    const status = await response.json();
+    authRequired = status.required;
+    csrfToken = status.csrf_token;
+    updateNetworkStatus();
+    if (status.required && !status.authenticated) {
+      showAuthOverlay();
+      return;
+    }
+    startDashboard();
+  } catch (error) {
+    showToast(`Controller unavailable; local queue is available. ${error.message}`);
+    updateNetworkStatus(false);
+    startDashboard();
+  }
+}
+
+function startDashboard() {
+  document.getElementById("auth-overlay").hidden = true;
+  document.getElementById("btn-logout").hidden = !authRequired;
+  if (dashboardStarted) return;
+  dashboardStarted = true;
   connectWebSocket();
   pollStatus();
   pollTelemetry();
+  loadBrowserTabs();
   loadVault();
+  loadOfflineQueue();
   setInterval(pollStatus, 1500);
   setInterval(pollTelemetry, 10000);
+  setInterval(loadBrowserTabs, 5000);
+}
+
+async function logout() {
+  try {
+    const response = await fetch("/api/auth/logout", { method: "POST" });
+    if (!response.ok) throw new Error(`Sign out failed (${response.status})`);
+    csrfToken = null;
+    showAuthOverlay();
+  } catch (error) {
+    showToast(`Unable to sign out: ${error.message}`);
+  }
+}
+
+function showAuthOverlay() {
+  document.getElementById("auth-overlay").hidden = false;
+  document.getElementById("auth-password").focus();
+}
+
+async function login(event) {
+  event.preventDefault();
+  const error = document.getElementById("auth-error");
+  const password = document.getElementById("auth-password").value;
+  error.hidden = true;
+  try {
+    const response = await nativeFetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ password })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      error.textContent = data.detail || "Sign-in failed.";
+      error.hidden = false;
+      return;
+    }
+    authRequired = true;
+    csrfToken = data.csrf_token;
+    document.getElementById("auth-password").value = "";
+    startDashboard();
+  } catch (exception) {
+    error.textContent = `Unable to sign in: ${exception.message}`;
+    error.hidden = false;
+  }
+}
+
+function updateNetworkStatus(controllerStatus) {
+  const network = document.getElementById("network-status");
+  const controller = document.getElementById("controller-status");
+  if (network) {
+    network.innerText = navigator.onLine ? "NETWORK: ONLINE" : "NETWORK: OFFLINE";
+    network.classList.toggle("offline", !navigator.onLine);
+  }
+  if (typeof controllerStatus === "boolean") controllerReachable = controllerStatus;
+  if (controller) {
+    controller.innerText = controllerReachable ? "CONTROLLER: READY" : "CONTROLLER: UNAVAILABLE";
+    controller.classList.toggle("offline", !controllerReachable);
+  }
+  const runButton = document.getElementById("btn-run");
+  if (runButton) runButton.disabled = !controllerReachable;
 }
 
 function applyPreset(key) {
@@ -101,6 +219,117 @@ async function submitGoal() {
   if (!prompt) {
     showToast("Please enter an objective or select a preset first.");
     return;
+  }
+
+  function openQueueDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("nova-apex-mission-queue", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("missions", { keyPath: "id" });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("Could not open the local mission queue."));
+    });
+  }
+
+  async function getQueuedMissions() {
+    const db = await openQueueDatabase();
+    return new Promise((resolve, reject) => {
+      const request = db.transaction("missions", "readonly").objectStore("missions").getAll();
+      request.onsuccess = () => resolve(request.result.sort((a, b) => a.createdAt - b.createdAt));
+      request.onerror = () => reject(request.error || new Error("Could not read the local mission queue."));
+    });
+  }
+
+  async function queueMission() {
+    const prompt = document.getElementById("goal-prompt").value.trim();
+    if (!prompt) {
+      showToast("Enter a mission before queuing it for review.");
+      return;
+    }
+    try {
+      const db = await openQueueDatabase();
+      const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const mission = { id, prompt, createdAt: Date.now() };
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction("missions", "readwrite");
+        transaction.objectStore("missions").add(mission);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error || new Error("Could not save the mission."));
+      });
+      await loadOfflineQueue();
+      showToast("Mission saved on this device. It will not run until you review and send it.");
+    } catch (error) {
+      showToast(`Unable to queue mission: ${error.message}`);
+    }
+  }
+
+  async function loadOfflineQueue() {
+    const container = document.getElementById("offline-queue-list");
+    if (!container || !("indexedDB" in window)) return;
+    try {
+      const missions = await getQueuedMissions();
+      document.getElementById("queue-count").innerText = `${missions.length} pending`;
+      if (missions.length === 0) {
+        container.innerHTML = `<div class="empty-state">No queued missions.</div>`;
+        return;
+      }
+      container.innerHTML = "";
+      missions.forEach((mission) => {
+        const card = document.createElement("div");
+        card.className = "queued-mission";
+        const prompt = document.createElement("p");
+        prompt.textContent = mission.prompt;
+        const actions = document.createElement("div");
+        actions.className = "queued-mission-actions";
+        const send = document.createElement("button");
+        send.className = "btn-sm";
+        send.textContent = "Review & send";
+        send.addEventListener("click", () => sendQueuedMission(mission));
+        const remove = document.createElement("button");
+        remove.className = "btn-danger-sm";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => removeQueuedMission(mission.id));
+        actions.append(send, remove);
+        card.append(prompt, actions);
+        container.appendChild(card);
+      });
+    } catch (error) {
+      container.innerHTML = `<div class="empty-state">Queue unavailable: ${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  async function sendQueuedMission(mission) {
+    if (!confirm(`Review this mission before sending it to the controller:\n\n${mission.prompt}\n\nIt may perform actions on your devices or external websites.`)) return;
+    if (!controllerReachable) {
+      showToast("The controller is unavailable. This mission remains queued.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/goal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: mission.prompt })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
+      await removeQueuedMission(mission.id, false);
+      showToast("Mission sent. Review the live execution status.");
+      pollStatus();
+    } catch (error) {
+      showToast(`Mission was not sent: ${error.message}`);
+    }
+  }
+
+  async function removeQueuedMission(id, refresh = true) {
+    const db = await openQueueDatabase();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction("missions", "readwrite");
+      transaction.objectStore("missions").delete(id);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error("Could not remove queued mission."));
+    });
+    if (refresh) await loadOfflineQueue();
   }
 
   // Immediate UI Feedback
@@ -210,20 +439,67 @@ async function directNavigate() {
 }
 
 async function directBrowserAction(action, target = null) {
+  let confirmed = false;
+  if (action === "submit_form") {
+    confirmed = confirm("Submit the currently open website form? This may create an account or make a change on the external site.");
+    if (!confirmed) return;
+  }
+  if (action === "evaluate_js") {
+    confirmed = confirm("Run the supplied JavaScript in the current website page?");
+    if (!confirmed) return;
+  }
   showToast(`Dispatching browser action: ${action}...`);
   try {
     const res = await fetch("/api/browser/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, target })
+      body: JSON.stringify({
+        action,
+        target,
+        confirmed,
+        email: action === "create_account"
+          ? document.getElementById("registration-email").value.trim() || null
+          : null
+      })
     });
     const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Browser request failed (${res.status})`);
     if (data.screenshot) {
       updateViewport(data.screenshot, "BROWSER");
     }
     showToast(data.success ? `Action ${action} completed.` : `Action failed: ${data.error}`);
+    await loadBrowserTabs();
   } catch (e) {
-    showToast("Action error: " + e);
+    showToast("Action error: " + e.message);
+  }
+}
+
+async function loadBrowserTabs() {
+  const container = document.getElementById("browser-tabs-list");
+  if (!container || !dashboardStarted) return;
+  try {
+    const response = await fetch("/api/manage/browser/tabs");
+    if (!response.ok) throw new Error(`Tab request failed (${response.status})`);
+    const data = await response.json();
+    container.replaceChildren();
+    if (!data.tabs || data.tabs.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "empty-state";
+      empty.textContent = "No browser tabs are open.";
+      container.appendChild(empty);
+      return;
+    }
+    data.tabs.forEach((tab) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `browser-tab${tab.is_active ? " active" : ""}`;
+      button.textContent = `${tab.title || "Untitled"} — ${tab.url}`;
+      button.title = tab.url;
+      button.addEventListener("click", () => directBrowserAction("switch_tab", String(tab.index)));
+      container.appendChild(button);
+    });
+  } catch (error) {
+    container.textContent = `Browser tabs unavailable: ${error.message}`;
   }
 }
 
@@ -249,9 +525,13 @@ async function toggleBrowserVisibility() {
 async function pollStatus() {
   try {
     const res = await fetch("/api/status");
+    if (!res.ok) throw new Error(`Controller status failed (${res.status})`);
     const data = await res.json();
+    updateNetworkStatus(true);
     renderStatus(data);
-  } catch (e) {}
+  } catch (e) {
+    updateNetworkStatus(false);
+  }
 }
 
 function renderStatus(data) {
@@ -268,7 +548,7 @@ function renderStatus(data) {
   if (!data || data.status === "idle") {
     statusText.innerText = "SYSTEM READY";
     statusPill.style.borderColor = "rgba(255,255,255,0.2)";
-    runBtn.disabled = false;
+    runBtn.disabled = !controllerReachable;
     runBtnText.innerText = "EXECUTE MISSION";
     progressContainer.style.display = "none";
     return;
@@ -292,13 +572,13 @@ function renderStatus(data) {
     progressContainer.style.display = "block";
   } else if (rawStatus === "SUCCESS") {
     statusPill.style.borderColor = "var(--accent-green)";
-    runBtn.disabled = false;
+    runBtn.disabled = !controllerReachable;
     runBtnText.innerText = "EXECUTE MISSION";
     progressFill.style.width = "100%";
     progressLabel.innerText = "100% COMPLETE";
   } else if (rawStatus === "FAILED") {
     statusPill.style.borderColor = "var(--accent-red)";
-    runBtn.disabled = false;
+    runBtn.disabled = !controllerReachable;
     runBtnText.innerText = "EXECUTE MISSION";
     progressLabel.innerText = "FAILED";
   }
@@ -327,9 +607,9 @@ function renderStatus(data) {
       <div class="step-info">
         <div class="step-title-line">
           <span class="step-number">#${step.step_id}</span>
-          <span class="step-title">${step.title}</span>
+          <span class="step-title">${escapeHtml(step.title)}</span>
         </div>
-        <span class="step-desc">${step.description}</span>
+        <span class="step-desc">${escapeHtml(step.description)}</span>
       </div>
       <div class="step-badge ${step.status}">${step.status}</div>
     `;
@@ -547,8 +827,8 @@ async function loadWindowsList() {
         <td><span class="badge-tag cyan">HWND ${w.hwnd}</span></td>
         <td style="font-weight: 500;">${escapeHtml(w.title)}</td>
         <td>
-          <button class="btn-sm" onclick="focusWindow(${w.hwnd})">🔍 Focus</button>
-          <button class="btn-danger-sm" onclick="closeWindow(${w.hwnd})">✕ Close</button>
+          <button class="btn-sm" data-action="focus-window" data-hwnd="${Number(w.hwnd)}">🔍 Focus</button>
+          <button class="btn-danger-sm" data-action="close-window" data-hwnd="${Number(w.hwnd)}">✕ Close</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -613,9 +893,9 @@ async function loadProcessList() {
     data.processes.forEach(p => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td><span class="badge-tag green">PID ${p.Id || p.PID || '--'}</span></td>
+        <td><span class="badge-tag green">PID ${escapeHtml(p.Id || p.PID || '--')}</span></td>
         <td style="font-weight: 600;">${escapeHtml(p.ProcessName || p.Name || '--')}</td>
-        <td>${p.MemoryMB || '--'} MB</td>
+        <td>${escapeHtml(p.MemoryMB || '--')} MB</td>
       `;
       tbody.appendChild(tr);
     });
@@ -646,9 +926,13 @@ async function loadMobileDetails() {
     }
 
     card.innerHTML = `
+      <label class="mobile-info-item" for="active-mobile-device">
+        <span>Active device:</span>
+        <select id="active-mobile-device" class="device-select"></select>
+      </label>
       <div class="mobile-info-item">
         <span>Device ID:</span>
-        <span class="badge-tag cyan">${data.device_id || '--'}</span>
+        <span class="badge-tag cyan">${escapeHtml(data.device_id || '--')}</span>
       </div>
       <div class="mobile-info-item">
         <span>Model:</span>
@@ -663,8 +947,33 @@ async function loadMobileDetails() {
         <span class="badge-tag green">${data.battery_level !== null ? data.battery_level + '%' : '--'}</span>
       </div>
     `;
+    const selector = document.getElementById("active-mobile-device");
+    data.devices.forEach((deviceId) => {
+      const option = document.createElement("option");
+      option.value = deviceId;
+      option.textContent = deviceId;
+      option.selected = deviceId === data.device_id;
+      selector.appendChild(option);
+    });
+    selector.addEventListener("change", () => selectMobileDevice(selector.value));
   } catch (e) {
     card.innerHTML = `<div class="empty-state">ADB query error: ${e}</div>`;
+  }
+}
+
+async function selectMobileDevice(deviceId) {
+  try {
+    const response = await fetch("/api/manage/mobile/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: deviceId })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not select the Android device.");
+    showToast(`Active Android device set to ${deviceId}`);
+    await loadMobileDetails();
+  } catch (error) {
+    showToast(`Device selection failed: ${error.message}`);
   }
 }
 
@@ -694,13 +1003,29 @@ async function scanMobileOTP() {
     const res = await fetch("/api/manage/mobile/otp");
     const data = await res.json();
     if (data.connected && data.otp) {
-      box.innerHTML = `
-        <p style="color: var(--accent-green); font-weight: 700;">INTERCEPTED 2FA CODE</p>
-        <div class="otp-code-display">${escapeHtml(data.otp)}</div>
-        <div class="otp-timestamp">Source: Device ${escapeHtml(data.device)} • Just now</div>
-        <button class="btn-sm" onclick="navigator.clipboard.writeText('${data.otp}'); showToast('OTP copied to clipboard!');">📋 Copy OTP Code</button>
-      `;
-      showToast(`2FA Code Detected: ${data.otp}`);
+      box.replaceChildren();
+      const heading = document.createElement("p");
+      heading.style.color = "var(--accent-green)";
+      heading.style.fontWeight = "700";
+      heading.textContent = "OTP DETECTED";
+      const otp = document.createElement("div");
+      otp.className = "otp-code-display";
+      otp.textContent = data.otp;
+      const source = document.createElement("div");
+      source.className = "otp-timestamp";
+      source.textContent = `Source: Device ${data.device} • Just now`;
+      const copy = document.createElement("button");
+      copy.className = "btn-sm";
+      copy.textContent = "Copy OTP Code";
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(String(data.otp));
+          showToast("OTP copied to clipboard.");
+        } catch (error) {
+          showToast(`Unable to copy OTP: ${error.message}`);
+        }
+      });
+      box.append(heading, otp, source, copy);
     } else {
       box.innerHTML = `
         <p>No new 2FA / verification codes found in notification stream.</p>
@@ -720,22 +1045,25 @@ async function loadVaultTable() {
   tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Querying secure vault...</td></tr>`;
 
   try {
-    const res = await fetch("/api/vault");
-    const data = await res.json();
-    const creds = data.credentials || [];
-    const accounts = data.created_accounts || [];
-
-    const allEntries = [...creds];
-    accounts.forEach(acc => {
-      if (!allEntries.some(c => c.service === acc.service && c.username === acc.username)) {
-        allEntries.push({
-          service: acc.service,
-          username: acc.username,
-          secret: acc.password || "••••••••",
-          timestamp: acc.timestamp || new Date().toISOString()
-        });
-      }
+    const [vaultResponse, credentialsResponse] = await Promise.all([
+      fetch("/api/vault"),
+      fetch("/api/manage/vault/credentials")
+    ]);
+    if (!vaultResponse.ok || !credentialsResponse.ok) throw new Error("Vault request failed.");
+    const vault = await vaultResponse.json();
+    const credentialData = await credentialsResponse.json();
+    const entries = new Map();
+    (vault.created_accounts || []).forEach((account) => {
+      entries.set(`${account.service}\u0000${account.username}`, {
+        service: account.service,
+        username: account.username,
+        timestamp: account.timestamp || ""
+      });
     });
+    (credentialData.credentials || []).forEach((credential) => {
+      entries.set(`${credential.service}\u0000${credential.username}`, credential);
+    });
+    const allEntries = [...entries.values()];
 
     if (allEntries.length === 0) {
       tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No credentials stored in vault yet.</td></tr>`;
@@ -745,20 +1073,60 @@ async function loadVaultTable() {
     tbody.innerHTML = "";
     allEntries.forEach(item => {
       const tr = document.createElement("tr");
-      const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString() : '--';
-      tr.innerHTML = `
-        <td><span class="badge-tag cyan">${escapeHtml(item.service)}</span></td>
-        <td style="font-weight: 600;">👤 ${escapeHtml(item.username)}</td>
-        <td><code>${escapeHtml(item.secret || '••••••••')}</code></td>
-        <td style="color: var(--text-muted); font-size: 10px;">${timeStr}</td>
-        <td>
-          <button class="btn-danger-sm" onclick="deleteVaultEntry('${escapeHtml(item.service)}', '${escapeHtml(item.username)}')">🗑️ Delete</button>
-        </td>
-      `;
+      const serviceCell = document.createElement("td");
+      const serviceBadge = document.createElement("span");
+      serviceBadge.className = "badge-tag cyan";
+      serviceBadge.textContent = `${item.service}${item.status === "draft" ? " · DRAFT" : ""}`;
+      serviceCell.appendChild(serviceBadge);
+      const usernameCell = document.createElement("td");
+      usernameCell.textContent = `👤 ${item.username}`;
+      const secretCell = document.createElement("td");
+      const secretText = document.createElement("code");
+      secretText.textContent = "Hidden";
+      const revealButton = document.createElement("button");
+      revealButton.className = "btn-sm";
+      revealButton.textContent = "Reveal";
+      revealButton.disabled = !credentialData.credentials.some(
+        (credential) => credential.service === item.service && credential.username === item.username
+      );
+      revealButton.addEventListener("click", () => revealVaultSecret(item, secretText, revealButton));
+      secretCell.append(secretText, document.createTextNode(" "), revealButton);
+      const timestampCell = document.createElement("td");
+      timestampCell.textContent = item.timestamp ? new Date(item.timestamp).toLocaleString() : "--";
+      const actionsCell = document.createElement("td");
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "btn-danger-sm";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", () => deleteVaultEntry(item.service, item.username));
+      actionsCell.appendChild(deleteButton);
+      tr.append(serviceCell, usernameCell, secretCell, timestampCell, actionsCell);
       tbody.appendChild(tr);
     });
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Error loading vault: ${e}</td></tr>`;
+  }
+}
+
+async function revealVaultSecret(item, secretText, button) {
+  if (button.dataset.revealed === "true") {
+    secretText.textContent = "Hidden";
+    button.textContent = "Reveal";
+    button.dataset.revealed = "false";
+    return;
+  }
+  try {
+    const response = await fetch("/api/manage/vault/credential/reveal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: item.service, username: item.username })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not reveal the credential.");
+    secretText.textContent = data.secret;
+    button.textContent = "Hide";
+    button.dataset.revealed = "true";
+  } catch (error) {
+    showToast(`Unable to reveal credential: ${error.message}`);
   }
 }
 
@@ -830,7 +1198,45 @@ function showToast(msg) {
   setTimeout(() => toast.classList.remove("visible"), 3200);
 }
 
+function setupUIActions() {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+
+    if (action === "switch-tab") switchHubTab(button.dataset.tab);
+    else if (action === "toggle-browser-mode") toggleBrowserVisibility();
+    else if (action === "logout") logout();
+    else if (action === "submit-goal") submitGoal();
+    else if (action === "toggle-pause") togglePause();
+    else if (action === "abort-goal") abortGoal();
+    else if (action === "queue-mission") queueMission();
+    else if (action === "browser-navigate") directNavigate();
+    else if (action === "browser-action") directBrowserAction(button.dataset.browserAction, button.dataset.target || null);
+    else if (action === "clear-logs") clearLogs();
+    else if (action === "refresh-workspace") loadWorkspaceTree();
+    else if (action === "save-file") saveActiveFile();
+    else if (action === "delete-file") deleteActiveFile();
+    else if (action === "refresh-windows") loadWindowsList();
+    else if (action === "refresh-processes") loadProcessList();
+    else if (action === "refresh-mobile") loadMobileDetails();
+    else if (action === "mobile-key") sendMobileKey(Number(button.dataset.keycode));
+    else if (action === "scan-mobile-otp") scanMobileOTP();
+    else if (action === "refresh-vault") loadVaultTable();
+    else if (action === "focus-window") focusWindow(Number(button.dataset.hwnd));
+    else if (action === "close-window") closeWindow(Number(button.dataset.hwnd));
+  });
+
+  document.getElementById("preset-selector").addEventListener("change", (event) => {
+    applyPreset(event.target.value);
+  });
+  document.getElementById("browser-url-bar").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") directNavigate();
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  setupUIActions();
   initApp();
   setupInteractiveViewport();
 });

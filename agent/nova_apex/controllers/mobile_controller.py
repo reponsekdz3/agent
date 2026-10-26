@@ -113,7 +113,7 @@ class MobileController:
             if otp_matches:
                 latest_code = otp_matches[-1]
                 agent_memory.set_working("latest_otp", latest_code)
-                agent_logger.success(f"INTERCEPTED 2FA VERIFICATION CODE: [{latest_code}]", domain="MOBILE")
+                agent_logger.success("Verification code detected on the connected device.", domain="MOBILE")
                 return latest_code
             return None
         except Exception as e:
